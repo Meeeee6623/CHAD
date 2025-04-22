@@ -21,7 +21,6 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate hat
 
 # Set environment variables for better performance
-export CUDA_VISIBLE_DEVICES=0,1
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=0
 export NCCL_NET_GDR_LEVEL=2
