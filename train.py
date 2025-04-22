@@ -12,6 +12,7 @@ import warnings
 from accelerate import Accelerator, DistributedType
 from accelerate.utils import set_seed as accelerate_set_seed # Use accelerate's seed setting
 from peft import LoraConfig, get_peft_model, TaskType
+import wandb  # Add wandb import
 
 # Local imports
 from model import HopfieldLlama3Model, create_model_and_load_weights # Function to handle creation+loading
@@ -173,6 +174,29 @@ def train(config_path, resume_from_checkpoint=None):
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
+    # --- Initialize Accelerator ---
+    mixed_precision = "bf16" if config.get("model_dtype") == "bfloat16" else "fp16" if config.get("model_dtype") == "float16" else "no"
+    # Gradient accumulation plugin handled by accelerator
+    accelerator = Accelerator(
+        mixed_precision=mixed_precision,
+        gradient_accumulation_steps=config['gradient_accumulation_steps'],
+        log_with="wandb" if config.get('use_wandb', False) else "tensorboard",
+        project_dir=config['output_dir']
+    )
+
+    # Initialize wandb through accelerator if enabled
+    if config.get('use_wandb', False):
+        accelerator.init_trackers(
+            project_name=config.get('wandb_project', 'ECE 661'),
+            config=config,
+            init_kwargs={
+                "wandb": {
+                    "entity": config.get('wandb_entity', 'benjamin-chauhan-usyd'),
+                    "name": config.get('wandb_run_name')
+                }
+            }
+        )
+
     # Override resume_from_checkpoint if provided as argument
     if resume_from_checkpoint:
         print(f"Command line resume_from_checkpoint provided: {resume_from_checkpoint}")
@@ -213,14 +237,6 @@ def train(config_path, resume_from_checkpoint=None):
 
 
     # --- Initialize Accelerator ---
-    mixed_precision = "bf16" if config.get("model_dtype") == "bfloat16" else "fp16" if config.get("model_dtype") == "float16" else "no"
-    # Gradient accumulation plugin handled by accelerator
-    accelerator = Accelerator(
-        mixed_precision=mixed_precision,
-        gradient_accumulation_steps=config['gradient_accumulation_steps'],
-        log_with="tensorboard",
-        project_dir=config['output_dir']
-    )
     accelerator.print(f"--- Configuration ---")
     # Handle resuming from checkpoint
     if config.get('resume_from_checkpoint'):
@@ -696,7 +712,8 @@ def train(config_path, resume_from_checkpoint=None):
                         current_lr = lr_scheduler.get_last_lr()[0] # Get first LR group
                         accelerator.print(f" Step: {global_step}, Avg Loss: {avg_step_loss:.4f}, LR: {current_lr:.2e}")
                         log_data = {"Loss/train": avg_step_loss, "LR": current_lr, "epoch": epoch + (completed_steps / (max_train_steps // config['num_train_epochs']))}
-                        try: accelerator.log(log_data, step=global_step)
+                        try: 
+                            accelerator.log(log_data, step=global_step)
                         except Exception as e: accelerator.print(f"Logging error: {e}")
                         total_loss = 0.0 # Reset loss accumulator for next period
 
@@ -708,7 +725,8 @@ def train(config_path, resume_from_checkpoint=None):
                         if accelerator.is_main_process: # Only log/save on main process
                              accelerator.print(f"Step {global_step} Eval Metrics: {eval_metrics}")
                              log_eval = {f"Eval/{k}": v for k,v in eval_metrics.items()}
-                             try: accelerator.log(log_eval, step=global_step)
+                             try: 
+                                 accelerator.log(log_eval, step=global_step)
                              except Exception as e: accelerator.print(f"Logging error: {e}")
 
                              # Update best model tracking based on eval metric
@@ -782,7 +800,8 @@ def train(config_path, resume_from_checkpoint=None):
                 eval_metrics = evaluate(model, eval_dataloader, tokenizer, accelerator.device, config, accelerator)
                 accelerator.print(f"End of Epoch {epoch+1} Eval Metrics: {eval_metrics}")
                 log_epoch_eval = {f"Eval_Epoch/{k}": v for k,v in eval_metrics.items()}
-                try: accelerator.log(log_epoch_eval, step=global_step)
+                try: 
+                    accelerator.log(log_epoch_eval, step=global_step)
                 except Exception as e: accelerator.print(f"Logging error: {e}")
 
                 current_metric_key = config.get("metric_for_best_model", "rougeL")
