@@ -1,7 +1,7 @@
 # Model Configuration
 model_name: "meta-llama/Llama-3.2-3B-Instruct" # Official 3B Instruct model
 model_dtype: "bfloat16" # bf16 preferred if supported, else float16
-attn_implementation: "sdpa" # Use Scaled Dot Product Attention; "flash_attention_2" if installed
+attn_implementation: "flash_attention_2" # Using FlashAttention 2 for faster training and less memory usage
 max_eval_examples: 5
 
 # Llama 3.2 3B parameters (Verify against official release if possible)
@@ -19,18 +19,18 @@ original_context_length: 128000
 context_length: 4096           # Max sequence length during training
 rope_freq: null                # Not used by default in 3.2 base
 
-# Enhanced Hopfield Layer Configuration
+# Enhanced Gated Hopfield Layer Configuration
 hopfield_heads: 24                     # 3072 / 24 = 128 head_dim
-hopfield_memory_slots: 512             # Increased from 256 to 512 for more capacity
-hopfield_num_updates: 1
+hopfield_memory_slots: 1024            # Doubled from 512 to 1024 for substantially larger capacity
+hopfield_num_updates: 3                # Increased from 2 to 3 for more refinement passes
 hopfield_init_method: "embedding_sampling"
-hopfield_update_strategy: "weighted"    # Changed from "gated" to "weighted" for different update mechanism
-hopfield_memory_update_lr: 0.02        # Increased from 0.01 for faster memory updates
-hopfield_gate_input_pooling: "mean"
-hopfield_update_target_method: "avg_query"
-hopfield_clamp_patterns: 3.0           # Lowered from 5.0 for softer constraints
-hopfield_clamp_beta: 10.0
-hopfield_combine_method: "add"
+hopfield_update_strategy: "gated"      # Using enhanced gated mechanism
+hopfield_memory_update_lr: 0.018       # Slightly increased for more impactful updates with larger memory
+hopfield_gate_input_pooling: "attention"  # Using attention-based pooling for nuanced gating
+hopfield_update_target_method: "max_query" # Using max query for stronger pattern focus
+hopfield_clamp_patterns: 3.0           # Reduced to allow more flexibility with larger memory
+hopfield_clamp_beta: 6.0               # Further reduced for smoother energy landscape with larger memory
+hopfield_combine_method: "gated_add"   # Enhanced combination method with gating
 
 # Data Configuration
 dataset_name: "deepmind/narrativeqa"
@@ -43,18 +43,18 @@ data_cache_dir: "./data_cache"        # Cache downloaded datasets
 # Training Configuration
 output_dir: "./narrativeqa_hat_finetune_3.2_3B_run2" # New run directory
 num_train_epochs: 20
-per_device_train_batch_size: 1         
-per_device_eval_batch_size: 2         
-gradient_accumulation_steps: 16        # Effective batch size = 1 * 16 = 16
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1         # Reduced from 2 to 1 for memory efficiency
+gradient_accumulation_steps: 32        # Increased from 16 to 32 for better memory efficiency
 learning_rate: 3e-5                    # Increased from 1e-5 for more aggressive learning
-hopfield_lr_multiplier: 8.0            # Increased from 5.0 for faster Hopfield learning
+hopfield_lr_multiplier: 5.0            # Balanced value for Hopfield learning
 weight_decay: 0.01
 adam_beta1: 0.9
 adam_beta2: 0.999
 adam_epsilon: 1e-8
 max_grad_norm: 1.0                    # Gradient clipping
 lr_scheduler_type: "cosine"
-warmup_ratio: 0.10                    # Increased from 0.05 for longer warmup
+warmup_ratio: 0.08                    # Intermediate warmup ratio
 logging_steps: 20                     
 save_steps: 900
 eval_steps: 900
