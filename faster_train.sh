@@ -8,7 +8,7 @@
 #SBATCH -o slurm-%j.out
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:2
-#SBATCH --constraint=a100_40gb
+#SBATCH --constraint="a100_40gb"
 #SBATCH --time=24:00:00
 
 # Load required modules
