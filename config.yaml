@@ -1,0 +1,78 @@
+# Model Configuration
+model_name: "meta-llama/Llama-3.2-3B-Instruct" # Official 3B Instruct model
+model_dtype: "bfloat16" # bf16 preferred if supported, else float16
+attn_implementation: "sdpa" # Use Scaled Dot Product Attention; "flash_attention_2" if installed
+max_eval_examples: 5
+
+# Llama 3.2 3B parameters (Verify against official release if possible)
+emb_dim: 3072
+n_layers: 28
+n_heads: 24
+n_kv_groups: 8
+hidden_dim: 8192         # FFN intermediate dim
+rope_base: 500000.0
+rms_norm_eps: 1e-5
+vocab_size: 128256       # Llama 3 Tokenizer size
+
+# Context Length
+original_context_length: 128000
+context_length: 4096           # Max sequence length during training
+rope_freq: null                # Not used by default in 3.2 base
+
+# Enhanced Hopfield Layer Configuration
+hopfield_heads: 24                     # 3072 / 24 = 128 head_dim
+hopfield_memory_slots: 512             # Increased from 256 to 512 for more capacity
+hopfield_num_updates: 1
+hopfield_init_method: "embedding_sampling"
+hopfield_update_strategy: "weighted"    # Changed from "gated" to "weighted" for different update mechanism
+hopfield_memory_update_lr: 0.02        # Increased from 0.01 for faster memory updates
+hopfield_gate_input_pooling: "mean"
+hopfield_update_target_method: "avg_query"
+hopfield_clamp_patterns: 3.0           # Lowered from 5.0 for softer constraints
+hopfield_clamp_beta: 10.0
+hopfield_combine_method: "add"
+
+# Data Configuration
+dataset_name: "deepmind/narrativeqa"
+story_chunk_size: 768
+story_chunk_overlap: 128
+# max_seq_length defined by context_length above
+max_answer_length: 64                 # For generation during evaluation
+data_cache_dir: "./data_cache"        # Cache downloaded datasets
+
+# Training Configuration
+output_dir: "./narrativeqa_hat_finetune_3.2_3B_run2" # New run directory
+num_train_epochs: 20
+per_device_train_batch_size: 1         
+per_device_eval_batch_size: 2         
+gradient_accumulation_steps: 16        # Effective batch size = 1 * 16 = 16
+learning_rate: 3e-5                    # Increased from 1e-5 for more aggressive learning
+hopfield_lr_multiplier: 8.0            # Increased from 5.0 for faster Hopfield learning
+weight_decay: 0.01
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1e-8
+max_grad_norm: 1.0                    # Gradient clipping
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.10                    # Increased from 0.05 for longer warmup
+logging_steps: 20                     
+save_steps: 900
+eval_steps: 900
+seed: 42
+gradient_checkpointing: True          # Enable gradient checkpointing
+
+# Enhanced PEFT LoRA Configuration
+use_lora: True
+lora_r: 32                           # Increased from 16 to 32 for higher rank
+lora_alpha: 64                       # Increased from 32 to 64 for more scaling
+lora_dropout: 0.05
+# Target modules for Llama 3 (verify exact names by printing model layers)
+lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+# Evaluation Configuration
+num_beams: 1
+# generation_max_length set dynamically
+
+# Hugging Face Hub Configuration (Optional)
+# push_to_hub: False
+# hub_model_id: "your-username/narrativeqa-hat-llama3.2-3b"

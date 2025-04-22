@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/pl217/continualearning/train.py", line 417, in <module>
+    train(config_file)
+  File "/home/pl217/continualearning/train.py", line 137, in train
+    raise TypeError(f"Configuration error: 'learning_rate' must be a number (int or float), but got {type(config.get('learning_rate'))}: {config.get('learning_rate')}")
+TypeError: Configuration error: 'learning_rate' must be a number (int or float), but got <class 'str'>: 2e-5

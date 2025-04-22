@@ -1,0 +1,21 @@
+Traceback (most recent call last):
+  File "/home/pl217/continualearning/train.py", line 388, in <module>
+    train(config_file)
+  File "/home/pl217/continualearning/train.py", line 155, in train
+    accelerator.init_trackers("narrativeqa_hat", config=config)
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/accelerate/accelerator.py", line 795, in _inner
+    return PartialState().on_main_process(function)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/accelerate/accelerator.py", line 2918, in init_trackers
+    tracker.store_init_configuration(config)
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/accelerate/tracking.py", line 81, in execute_on_main_process
+    return PartialState().on_main_process(function)(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/accelerate/tracking.py", line 213, in store_init_configuration
+    self.writer.add_hparams(values, metric_dict={})
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/torch/utils/tensorboard/writer.py", line 330, in add_hparams
+    exp, ssi, sei = hparams(hparam_dict, metric_dict, hparam_domain_discrete)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/torch/utils/tensorboard/summary.py", line 318, in hparams
+    raise ValueError(
+ValueError: value should be one of int, float, str, bool, or torch.Tensor

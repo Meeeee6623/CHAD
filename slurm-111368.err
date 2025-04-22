@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/home/pl217/continualearning/train.py", line 7, in <module>
+    from transformers import get_scheduler, AdamW # AdamW from transformers is often preferred
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ImportError: cannot import name 'AdamW' from 'transformers' (/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/transformers/__init__.py)

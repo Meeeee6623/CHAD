@@ -1,0 +1,47 @@
+/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py:896: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+/home/pl217/continualearning/model.py:670: UserWarning: Weight loading missing non-Hopfield keys: ['out_head.weight']
+  if missing: warnings.warn(f"Weight loading missing non-Hopfield keys: {missing}")
+/home/pl217/continualearning/model.py:275: UserWarning: Error assigning sampled embeddings (shape mismatch?): shape '[24, 256, 128]' is invalid for input of size 18874368. Falling back to random.
+  warnings.warn(f"Error assigning sampled embeddings (shape mismatch?): {e}. Falling back to random.")
+/home/pl217/continualearning/data_loader.py:56: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  self._processed_data = torch.load(self.cache_path)
+Epoch 1:   0%|          | 0/2047 [00:00<?, ?it/s]You're using a PreTrainedTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+You're using a PreTrainedTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+You're using a PreTrainedTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+You're using a PreTrainedTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+Traceback (most recent call last):
+  File "/home/pl217/continualearning/train.py", line 525, in <module>
+    train(config_file)
+  File "/home/pl217/continualearning/train.py", line 375, in train
+    _ = model(input_ids=ctx_ids, position_ids=ctx_pos_ids)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/accelerate/utils/operations.py", line 814, in forward
+    return model_forward(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/accelerate/utils/operations.py", line 802, in __call__
+    return convert_to_fp32(self.model_forward(*args, **kwargs))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/torch/amp/autocast_mode.py", line 44, in decorate_autocast
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/peft_model.py", line 1757, in forward
+    return self.base_model(
+           ^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/tuners/tuners_utils.py", line 193, in forward
+    return self.model.forward(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: HopfieldLlama3Model.forward() got an unexpected keyword argument 'output_attentions'
+Epoch 1:   0%|          | 0/2047 [00:07<?, ?it/s]

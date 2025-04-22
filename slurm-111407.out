@@ -1,0 +1,141 @@
+[2025-04-21 02:50:19,606] [INFO] [real_accelerator.py:239:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+Warning: The cache directory for DeepSpeed Triton autotune, /home/pl217/.triton/autotune, appears to be on an NFS system. While this is generally acceptable, if you experience slowdowns or hanging when DeepSpeed exits, it is recommended to set the TRITON_CACHE_DIR environment variable to a non-NFS path.
+--- Configuration ---
+model_name: meta-llama/Llama-3.2-3B-Instruct
+model_dtype: bfloat16
+attn_implementation: sdpa
+max_eval_examples: 100
+emb_dim: 3072
+n_layers: 28
+n_heads: 24
+n_kv_groups: 8
+hidden_dim: 8192
+rope_base: 500000.0
+rms_norm_eps: 1e-05
+vocab_size: 128256
+original_context_length: 128000
+context_length: 4096
+rope_freq: None
+hopfield_heads: 24
+hopfield_memory_slots: 256
+hopfield_num_updates: 1
+hopfield_init_method: embedding_sampling
+hopfield_update_strategy: gated
+hopfield_memory_update_lr: 0.01
+hopfield_gate_input_pooling: mean
+hopfield_update_target_method: avg_query
+hopfield_clamp_patterns: 5.0
+hopfield_clamp_beta: 10.0
+hopfield_combine_method: add
+dataset_name: deepmind/narrativeqa
+story_chunk_size: 768
+story_chunk_overlap: 128
+max_answer_length: 64
+data_cache_dir: ./data_cache
+output_dir: ./narrativeqa_hat_finetune_3.2_3B_run1
+num_train_epochs: 1
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 2
+gradient_accumulation_steps: 16
+learning_rate: 2e-05
+hopfield_lr_multiplier: 5.0
+weight_decay: 0.01
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1e-08
+max_grad_norm: 1.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+logging_steps: 20
+save_steps: 5
+eval_steps: 500
+seed: 42
+gradient_checkpointing: True
+use_lora: True
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules: ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
+num_beams: 1
+---------------------
+---> TensorBoard logging initialized. Log directory for this run: ./narrativeqa_hat_finetune_3.2_3B_run1/narrativeqa_hat
+Loading tokenizer...
+No PAD token found. Adding and using EOS token as PAD.
+Tokenizer loaded. Vocab size: 128000
+BOS: '<|begin_of_text|>' (ID: 128000), EOS: '<|eot_id|>' (ID: 128009), PAD: '<|eot_id|>' (ID: 128009)
+Creating/Loading model and weights...
+Initializing HopfieldLlama3Model (Scratch Base) with dtype: torch.bfloat16
+Initialized Gated Update mechanism.
+Gradient checkpointing enabled for Transformer blocks.
+Loading pretrained weights for meta-llama/Llama-3.2-3B-Instruct...
+Assuming 2 weight shards for meta-llama/Llama-3.2-3B-Instruct.
+Loading weights from model-00001-of-00002.safetensors to CPU...
+Loading weights from model-00002-of-00002.safetensors to CPU...
+Base model weights loaded into HAT structure.
+Applying weight tying for output head.
+Explicitly initializing Hopfield memory...
+Initializing Hopfield memory (embedding_sampling)...
+Initialized stored patterns by sampling embeddings (sliced to head_dim).
+Applying LoRA adapters...
+Applying LoRA to modules: ['trf_blocks.8.ff.fc1', 'trf_blocks.23.att.q_proj', 'trf_blocks.7.att.q_proj', 'trf_blocks.11.att.k_proj', 'trf_blocks.13.att.k_proj', 'trf_blocks.2.att.q_proj', 'trf_blocks.9.att.k_proj', 'trf_blocks.17.att.v_proj', 'trf_blocks.23.att.o_proj', 'trf_blocks.14.att.o_proj', 'trf_blocks.2.ff.fc2', 'trf_blocks.21.ff.fc1', 'trf_blocks.2.att.v_proj', 'trf_blocks.3.ff.fc1', 'trf_blocks.17.att.k_proj', 'trf_blocks.0.att.q_proj', 'trf_blocks.14.att.v_proj', 'trf_blocks.21.ff.fc3', 'trf_blocks.0.ff.fc1', 'trf_blocks.3.ff.fc3', 'trf_blocks.10.ff.fc2', 'trf_blocks.1.att.v_proj', 'trf_blocks.11.ff.fc3', 'trf_blocks.22.ff.fc1', 'trf_blocks.24.ff.fc1', 'trf_blocks.16.att.k_proj', 'trf_blocks.5.att.k_proj', 'trf_blocks.20.ff.fc1', 'trf_blocks.25.ff.fc2', 'trf_blocks.9.ff.fc3', 'trf_blocks.4.ff.fc2', 'trf_blocks.8.att.v_proj', 'trf_blocks.15.att.k_proj', 'trf_blocks.19.ff.fc1', 'trf_blocks.19.ff.fc2', 'trf_blocks.13.ff.fc3', 'trf_blocks.24.ff.fc2', 'trf_blocks.7.ff.fc3', 'trf_blocks.23.ff.fc3', 'trf_blocks.8.ff.fc2', 'trf_blocks.17.att.q_proj', 'trf_blocks.11.ff.fc2', 'trf_blocks.27.att.o_proj', 'trf_blocks.15.ff.fc3', 'trf_blocks.11.att.o_proj', 'trf_blocks.20.att.v_proj', 'trf_blocks.1.att.q_proj', 'trf_blocks.3.att.o_proj', 'trf_blocks.6.att.k_proj', 'trf_blocks.17.ff.fc3', 'trf_blocks.24.att.v_proj', 'trf_blocks.14.att.k_proj', 'trf_blocks.5.ff.fc2', 'trf_blocks.6.ff.fc3', 'trf_blocks.3.att.k_proj', 'trf_blocks.12.att.v_proj', 'trf_blocks.18.att.k_proj', 'trf_blocks.21.att.v_proj', 'trf_blocks.25.ff.fc3', 'trf_blocks.8.att.o_proj', 'trf_blocks.16.ff.fc2', 'trf_blocks.21.ff.fc2', 'trf_blocks.7.att.k_proj', 'trf_blocks.0.att.v_proj', 'trf_blocks.10.att.o_proj', 'trf_blocks.6.ff.fc2', 'trf_blocks.7.ff.fc2', 'trf_blocks.13.ff.fc2', 'trf_blocks.14.ff.fc3', 'trf_blocks.16.ff.fc1', 'trf_blocks.1.att.k_proj', 'trf_blocks.20.att.q_proj', 'trf_blocks.6.ff.fc1', 'trf_blocks.19.att.k_proj', 'trf_blocks.4.att.o_proj', 'trf_blocks.10.ff.fc3', 'trf_blocks.1.ff.fc1', 'trf_blocks.17.att.o_proj', 'trf_blocks.13.att.v_proj', 'trf_blocks.25.att.k_proj', 'trf_blocks.26.ff.fc2', 'trf_blocks.10.att.v_proj', 'trf_blocks.22.ff.fc3', 'trf_blocks.2.att.k_proj', 'trf_blocks.16.att.o_proj', 'trf_blocks.5.att.o_proj', 'trf_blocks.21.att.q_proj', 'trf_blocks.26.att.v_proj', 'trf_blocks.4.att.k_proj', 'trf_blocks.19.att.o_proj', 'trf_blocks.8.att.k_proj', 'trf_blocks.3.att.v_proj', 'trf_blocks.7.att.o_proj', 'trf_blocks.11.ff.fc1', 'trf_blocks.18.att.v_proj', 'trf_blocks.1.ff.fc3', 'trf_blocks.19.ff.fc3', 'trf_blocks.23.ff.fc1', 'trf_blocks.26.att.q_proj', 'trf_blocks.23.att.k_proj', 'trf_blocks.10.ff.fc1', 'trf_blocks.24.att.q_proj', 'trf_blocks.8.ff.fc3', 'trf_blocks.4.ff.fc3', 'trf_blocks.13.ff.fc1', 'trf_blocks.26.att.o_proj', 'trf_blocks.19.att.v_proj', 'trf_blocks.27.att.q_proj', 'trf_blocks.26.ff.fc3', 'trf_blocks.4.ff.fc1', 'trf_blocks.27.ff.fc3', 'trf_blocks.0.ff.fc3', 'trf_blocks.13.att.o_proj', 'trf_blocks.22.ff.fc2', 'trf_blocks.10.att.q_proj', 'trf_blocks.9.ff.fc2', 'trf_blocks.5.ff.fc1', 'trf_blocks.20.ff.fc3', 'trf_blocks.1.ff.fc2', 'trf_blocks.14.ff.fc1', 'trf_blocks.3.att.q_proj', 'trf_blocks.18.att.o_proj', 'trf_blocks.18.ff.fc1', 'trf_blocks.15.att.o_proj', 'trf_blocks.1.att.o_proj', 'trf_blocks.2.att.o_proj', 'trf_blocks.9.att.v_proj', 'trf_blocks.19.att.q_proj', 'trf_blocks.4.att.v_proj', 'trf_blocks.11.att.v_proj', 'trf_blocks.6.att.v_proj', 'trf_blocks.27.ff.fc1', 'trf_blocks.23.att.v_proj', 'trf_blocks.27.att.k_proj', 'trf_blocks.9.ff.fc1', 'trf_blocks.22.att.v_proj', 'trf_blocks.26.att.k_proj', 'trf_blocks.14.att.q_proj', 'trf_blocks.26.ff.fc1', 'trf_blocks.3.ff.fc2', 'trf_blocks.24.ff.fc3', 'trf_blocks.15.att.v_proj', 'trf_blocks.7.att.v_proj', 'trf_blocks.15.ff.fc1', 'trf_blocks.22.att.k_proj', 'trf_blocks.12.ff.fc2', 'trf_blocks.23.ff.fc2', 'trf_blocks.5.ff.fc3', 'trf_blocks.2.ff.fc1', 'trf_blocks.18.att.q_proj', 'trf_blocks.12.att.o_proj', 'trf_blocks.25.att.v_proj', 'trf_blocks.11.att.q_proj', 'trf_blocks.18.ff.fc2', 'trf_blocks.16.att.v_proj', 'trf_blocks.0.att.k_proj', 'trf_blocks.13.att.q_proj', 'trf_blocks.5.att.v_proj', 'trf_blocks.21.att.o_proj', 'trf_blocks.25.att.o_proj', 'trf_blocks.24.att.o_proj', 'trf_blocks.27.att.v_proj', 'trf_blocks.9.att.o_proj', 'trf_blocks.9.att.q_proj', 'trf_blocks.14.ff.fc2', 'trf_blocks.24.att.k_proj', 'trf_blocks.4.att.q_proj', 'trf_blocks.17.ff.fc1', 'trf_blocks.12.att.k_proj', 'trf_blocks.20.att.o_proj', 'trf_blocks.17.ff.fc2', 'trf_blocks.20.att.k_proj', 'trf_blocks.6.att.o_proj', 'trf_blocks.25.att.q_proj', 'trf_blocks.15.ff.fc2', 'trf_blocks.12.att.q_proj', 'trf_blocks.27.ff.fc2', 'trf_blocks.18.ff.fc3', 'trf_blocks.20.ff.fc2', 'trf_blocks.5.att.q_proj', 'trf_blocks.25.ff.fc1', 'trf_blocks.6.att.q_proj', 'trf_blocks.12.ff.fc3', 'trf_blocks.10.att.k_proj', 'trf_blocks.21.att.k_proj', 'trf_blocks.16.att.q_proj', 'trf_blocks.7.ff.fc1', 'trf_blocks.15.att.q_proj', 'trf_blocks.2.ff.fc3', 'trf_blocks.16.ff.fc3', 'trf_blocks.0.att.o_proj', 'trf_blocks.0.ff.fc2', 'trf_blocks.8.att.q_proj', 'trf_blocks.22.att.o_proj', 'trf_blocks.22.att.q_proj', 'trf_blocks.12.ff.fc1']
+trainable params: 24,313,856 || all params: 8,079,164,440 || trainable%: 0.3009
+Model creation and weight loading complete.
+Model structure created and weights loaded.
+Gradient checkpointing enabled for Transformer blocks.
+Setting up optimizer...
+Optimizer: Base/LoRA LR=2e-05, Hopfield LR=0.0001
+Found 392 trainable base/LoRA params, 8 trainable Hopfield params.
+Loading datasets...
+Processed summary data cache not found for split 'train': ./data_cache/processed_narrativeqa_summary/processed_summary_train_03c32b4c22f543d0.pt. Processing...
+Processing train split using summaries...
+
+--- First Processed Example (Summary Based) --- 
+Document ID: 0029bdbe75423337b551e42bb31f9a102785376f
+
+Summary Context Tokens (1079):
+ At Madeline Hall, an old mansion-house near Southampton belonging to the wealthy de Versely family, lives an elderly spinster Miss Delmar, the aunt of the earl de Versely and Captain Delmar. Miss Delmar invites Arabella Mason, the daughter of a deceased, well-liked steward to stay with her as a lower-class guest in the house. Captain Delmar is known to visit his aunt at Madeline Hall frequently, accompanied by his valet Ben Keene, who is also a private marine. Captain Delmar eventually suggests that Ben should propose to Arabella, and the two marry in secret, to the frustration of Miss Delmar and Arabella's mother. The captain is able to smooth over the situation with his aunt, even after it is discovered that Arabella was six months pregnant at the time of the marriage. She later gives birth to a boy, who takes the Captain's Christian name and Ben's surname--the titular Percival Keene.
+The family moves to Chatham, after Ben is ordered back with his detachment. Arabella opens up a successful shop and circulating library below her house, enlisting the help of her mother and sister, Amelia. Percival becomes well known in town from his mischievous pranks on officers and other strangers, often encouraged by his aunt Amelia. However, Percival's mother and grandmother are less fond of his disregard for manners, and insist on sending him to school after an episode in which he bites his grandmother. Percival reports to the school house of Mr. O'Gallagher, a poor Irish scholar, who rules his class with a system of severe corporal punishment. Mr. O'Gallagher routinely bullies Percival by stealing his lunch, leading Percival to seek revenge by poisoning his sandwiches with calomel. On Guy Fawkes Day the schoolteacher confiscates all the schoolboys' fireworks, for which Percival retaliates by setting off the collected fireworks while the teacher sits above them, leading to the total destruction of the schoolhouse and near death of the schoolmaster.
+When Percival is a young teenager, Captain Delmar reappears and offers him a position aboard his new navy ship, the H.M. Calliope. While preparing to enter service, Percival overhears gossip of his illegitimate birth, introducing the idea that Captain Delmar may be his father. He confronts his mother about his parentage, which she at first harshly denies but later tearfully explains the truth of her affair. Early in his service in the navy, Percival is captured during a pirate raid along with others. The pirate crew is entirely black, and the captain explains that they are primarily escaped slaves from the Americas. Percival is taken in as a cabin boy, and later dyes his skin tan in the appearance of a mulatto to please the captain who doesn't approve of white skin. The pirates often seek to take over slave trading vessels, killing every white person on board. During the taking of one such vessel, Percival is able is convince the captain to spare the lives of a wealthy Dutch merchant and his young daughter, Minnie. Eventually the H.M. Calliope takes the pirate ship, and Percival--unrecognizable with his dyed skin--is taken as a prisoner, later to convince his fellow shipman of his true identity.
+After his reappearance aboard the ship, Percival gains esteem among the crew and is welcomed back by the emotional Captain Delmar. His reputation continues to grow over the course of his service in conflicts with Dutch and French vessels around the island of Curacao. He also stands in for an ill Captain Delmar in a duel with a French officer, effectively saving the captain's life. At this point, the captain receives news that his older brother has died, making him the new Lord de Versely, and before returning to England he grants Perceval command of his own schooner. After another intense but successful battle with a French war ship, Percival is promoted to captain. During his service in the Navy, Percival still partakes in the merry pranks of his youth, and at one point teams up with a mulatto hotel owner in Curaรงao to convince his fellow officers they've been poisoned. He also keeps correspondence with Minnie, developing a romance with the beautiful heiress.
+Near the end of the story, Percival guides his crew through a terrible storm in which many of the crew are killed and the ship is heavily damaged. After being saved by another English vessel, he receives a letter informing him of Lord de Versely's sudden death from heart complications and learns that he has been left all of his personal property. Percival is still disappointed that he can not take his father's name. He later journey's with his friend Bob Cross to Hamburg to reunite with Minnie, but is captured by French troops on the road and sentenced to execution for spying. During a skirmish between the French and the Cossacks, Percival and Cross are able to escape and continue on the road. At the end of the novel, Percival proposes to Minnie, and stands to inherit a great fortune through her father. He also receives a letter from the de Versely attorney letting him know he has been granted the arms and name of Delmar.
+
+Original Question:
+Who is Miss Delmer?
+
+Answer Tokens (15):
+the elderly spinster aunt of the Earl de Verseley and Captain Delmar
+
+Context End Index: 1079
+-----------------------------
+
+Finished processing train (summaries). Created 32747 instances. Skipped 0.
+Saving processed summary data for split 'train' to cache: ./data_cache/processed_narrativeqa_summary/processed_summary_train_03c32b4c22f543d0.pt
+Processed summary data cache not found for split 'validation': ./data_cache/processed_narrativeqa_summary/processed_summary_validation_70bf27cd759b0fba.pt. Processing...
+Processing validation split using summaries...
+
+--- First Processed Example (Summary Based) --- 
+Document ID: 00fb61fa7bee266ad995e52190ebb73606b60b70
+
+Summary Context Tokens (407):
+ The play begins with three pages disputing over the black cloak usually worn by the actor who delivers the prologue. They draw lots for the cloak, and one of the losers, Anaides, starts telling the audience what happens in the play to come; the others try to suppress him, interrupting him and putting their hands over his mouth. Soon they are fighting over the cloak and criticizing the author and the spectators as well.
+In the play proper, the goddess Diana, also called Cynthia, has ordained a "solemn revels" in the valley of Gargaphie in Greece. The gods Cupid and Mercury appear, and they too start to argue. Mercury has awakened Echo, who weeps for Narcissus, and states that a drink from Narcissus's spring causes the drinkers to "Grow dotingly enamored of themselves." The courtiers and ladies assembled for the Cynthia's revels all drink from the spring.
+Asotus, a foolish spendthrift who longs to become a courtier and a master of fashion and manners, also drinks from the spring; emboldened by vanity and self-love, he challenges all comers to a competition of "court compliment." The competition is held, in four phases, and the courtiers are beaten. Two symbolic masques are performed within the play for the assembled revelers. At their conclusion, Cynthia (representing Queen Elizabeth) has the dancers unmask and shows that vices have masqueraded as virtues. She sentences them to make reparation and to purify themselves by bathing in the spring at Mount Helicon.
+The figure of Actaeon in the play may represent Robert Devereux, 2nd Earl of Essex, while Cynthia's lady in waiting Arete may be Lucy, Countess of Bedford, one of Elizabeth's ladies in waiting as well as Jonson's patroness.
+The play is notably rich in music, as is typical for the theatre of the boys' companies, which originated as church choirs.
+
+Original Question:
+WHO NORMALLY DELIVERS THE OPENING PROLOGUE IN THE PLAY?
+
+Answer Tokens (10):
+THE ACTOR WEARING THE BLACK CLOAK
+
+Context End Index: 407
+-----------------------------
+
+Finished processing validation (summaries). Created 3461 instances. Skipped 0.
+Saving processed summary data for split 'validation' to cache: ./data_cache/processed_narrativeqa_summary/processed_summary_validation_70bf27cd759b0fba.pt
+Scheduler: Type=cosine, Total Steps=2047, Num Processes=1
+Model, optimizer, dataloaders, scheduler prepared with Accelerator.
+Starting training...
+Total train batch size (accumulated, distributed): 16
+Total optimization steps: 2047

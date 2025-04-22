@@ -1,0 +1,34 @@
+/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py:896: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+/home/pl217/continualearning/model.py:644: UserWarning: Weight loading missing non-Hopfield keys: ['out_head.weight']
+  if missing: warnings.warn(f"Weight loading missing non-Hopfield keys: {missing}")
+/home/pl217/continualearning/model.py:269: UserWarning: Error assigning sampled embeddings (shape mismatch?): shape '[24, 256, 128]' is invalid for input of size 18874368. Falling back to random.
+  warnings.warn(f"Error assigning sampled embeddings (shape mismatch?): {e}. Falling back to random.")
+Traceback (most recent call last):
+  File "/home/pl217/continualearning/train.py", line 525, in <module>
+    train(config_file)
+  File "/home/pl217/continualearning/train.py", line 235, in train
+    model, config = create_model_and_load_weights(config, use_lora=config.get("use_lora"), lora_config_dict=lora_config_dict)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/continualearning/model.py", line 680, in create_model_and_load_weights
+    model = get_peft_model(model, peft_config)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/mapping_func.py", line 123, in get_peft_model
+    return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/peft_model.py", line 1722, in __init__
+    super().__init__(model, peft_config, adapter_name, **kwargs)
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/peft_model.py", line 132, in __init__
+    self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/tuners/lora/model.py", line 142, in __init__
+    super().__init__(model, config, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/tuners/tuners_utils.py", line 180, in __init__
+    self.inject_adapter(self.model, adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/tuners/tuners_utils.py", line 548, in inject_adapter
+    tied_target_modules = self._get_tied_target_modules(model=model)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/peft/tuners/tuners_utils.py", line 634, in _get_tied_target_modules
+    if model_config.get("tie_word_embeddings"):
+       ^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'get'

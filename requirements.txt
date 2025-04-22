@@ -1,0 +1,17 @@
+torch>=2.1.0
+transformers>=4.43.0 # Use recent version for Llama 3.2 support
+datasets>=2.14.0
+accelerate>=0.29.0 # Use recent version
+evaluate>=0.4.0
+bitsandbytes>=0.43.0 # Check compatibility with your CUDA version
+peft>=0.10.0       # Use recent version
+tiktoken>=0.6.0
+huggingface_hub>=0.20.0
+pyyaml>=6.0
+scikit-learn>=1.3.0
+nltk>=3.8
+rouge_score>=0.1.2
+sacrebleu>=2.3.0
+tensorboard
+safetensors>=0.4.0
+# sentencepiece # May be needed by tokenizer depending on HF implementation

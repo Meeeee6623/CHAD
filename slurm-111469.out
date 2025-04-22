@@ -1,0 +1,4 @@
+[2025-04-21 15:20:02,069] [INFO] [real_accelerator.py:239:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+Warning: The cache directory for DeepSpeed Triton autotune, /home/pl217/.triton/autotune, appears to be on an NFS system. While this is generally acceptable, if you experience slowdowns or hanging when DeepSpeed exits, it is recommended to set the TRITON_CACHE_DIR environment variable to a non-NFS path.
+Command line resume_from_checkpoint provided: /home/pl217/continualearning/narrativeqa_hat_finetune_3.2_3B_run1/checkpoint-100
+Overriding config value: /home/pl217/continualearning/narrativeqa_hat_finetune_3.2_3B_run1/checkpoint-100

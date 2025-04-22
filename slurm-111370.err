@@ -1,0 +1,57 @@
+/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py:896: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+Traceback (most recent call last):
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/utils/_http.py", line 409, in hf_raise_for_status
+    response.raise_for_status()
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/requests/models.py", line 1024, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 404 Client Error: Not Found for url: https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/model.safetensors
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/pl217/continualearning/model.py", line 505, in create_model_and_load_weights
+    weights_file = hf_hub_download(
+                   ^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 961, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1024, in _hf_hub_download_to_cache_dir
+    (url_to_download, etag, commit_hash, expected_size, xet_file_data, head_call_error) = _get_metadata_or_catch_error(
+                                                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1484, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1401, in get_hf_file_metadata
+    r = _request_wrapper(
+        ^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 285, in _request_wrapper
+    response = _request_wrapper(
+               ^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 309, in _request_wrapper
+    hf_raise_for_status(response)
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/utils/_http.py", line 420, in hf_raise_for_status
+    raise _format(EntryNotFoundError, message, response) from e
+huggingface_hub.errors.EntryNotFoundError: 404 Client Error. (Request ID: Root=1-68049515-1c33b3a94e8ce1181e54d5f9;1432dd57-d64e-45f0-989c-09d4aa512d29)
+
+Entry Not Found for url: https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/model.safetensors.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/pl217/continualearning/train.py", line 406, in <module>
+    train(config_file)
+  File "/home/pl217/continualearning/train.py", line 196, in train
+    model, config = create_model_and_load_weights(config_path, use_lora=config.get("use_lora"), lora_config_dict=lora_config_dict)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/continualearning/model.py", line 517, in create_model_and_load_weights
+    raise RuntimeError(f"Failed to load weights: {e}. Check model name and HF Hub access.")
+RuntimeError: Failed to load weights: 404 Client Error. (Request ID: Root=1-68049515-1c33b3a94e8ce1181e54d5f9;1432dd57-d64e-45f0-989c-09d4aa512d29)
+
+Entry Not Found for url: https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/resolve/main/model.safetensors.. Check model name and HF Hub access.
