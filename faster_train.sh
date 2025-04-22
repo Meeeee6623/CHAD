@@ -2,14 +2,15 @@
 #SBATCH --job-name=hat-finetune
 #SBATCH --cpus-per-task=16
 #SBATCH --ntasks=1
-#SBATCH --gpus-per-task=2
-#SBATCH --mem=100g
+#SBATCH --mem=40g
 #SBATCH -e slurm-%j.err
 #SBATCH -o slurm-%j.out
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:2
-#SBATCH --constraint="a100_40gb"
+#SBATCH --gres=gpu:a100:2
 #SBATCH --time=24:00:00
+
+#SBATCH --mail-type=ALL             #Send email on all job events
+#SBATCH --mail-user=bsc32@duke.edu   #Send all emails to email_address
 
 # Load required modules
 module load cuda/11.8
