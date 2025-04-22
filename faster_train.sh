@@ -6,7 +6,7 @@
 #SBATCH -e slurm-%j.err
 #SBATCH -o slurm-%j.out
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:a100:2
+#SBATCH --gres=gpu:a100:4
 #SBATCH --time=24:00:00
 
 #SBATCH --mail-type=ALL             #Send email on all job events
