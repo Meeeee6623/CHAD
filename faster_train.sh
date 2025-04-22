@@ -28,7 +28,7 @@ export NCCL_P2P_LEVEL=NVL
 
 # Enable mixed precision training
 export TORCH_CUDA_ARCH_LIST="8.0"  # For A100
-export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+# export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
 # # Create accelerate config if it doesn't exist
 # if [ ! -f "accelerate_config.yaml" ]; then

@@ -261,11 +261,25 @@ class HopfieldMemoryLayer(nn.Module):
         self.storedpatterns = nn.Parameter(
             torch.empty(self.n_heads, self.n_memory_slots, self.head_dim, dtype=self.dtype)
         )
+        
+        # Print debug information about parameter sizes
+        storedpatterns_params = self.n_heads * self.n_memory_slots * self.head_dim
+        print(f"[DEBUG] Hopfield storedpatterns: shape={self.storedpatterns.shape}, params={storedpatterns_params}")
+        
         self._initialized = False
 
         self.q_proj = nn.Linear(self.emb_dim, self.pattern_dim, bias=False, dtype=self.dtype)
         self.k_proj = nn.Linear(self.head_dim, self.head_dim, bias=False, dtype=self.dtype)
         self.v_proj = nn.Linear(self.head_dim, self.head_dim, bias=False, dtype=self.dtype)
+        
+        # Print linear layer parameter counts
+        q_proj_params = self.emb_dim * self.pattern_dim
+        k_proj_params = self.head_dim * self.head_dim
+        v_proj_params = self.head_dim * self.head_dim
+        print(f"[DEBUG] Hopfield q_proj: params={q_proj_params}")
+        print(f"[DEBUG] Hopfield k_proj: params={k_proj_params}")
+        print(f"[DEBUG] Hopfield v_proj: params={v_proj_params}")
+        
         # Correct beta shape for broadcasting: [1, H_hop, 1, 1]
         self.beta = nn.Parameter(torch.ones(1, self.n_heads, 1, 1, dtype=self.dtype))
 
@@ -278,11 +292,21 @@ class HopfieldMemoryLayer(nn.Module):
             gate_input_dim = self.emb_dim * 2
             gate_output_dim = self.n_heads * self.n_memory_slots * self.head_dim
             self.gate_linear = nn.Linear(gate_input_dim, gate_output_dim, bias=False, dtype=self.dtype)
+            print(f"[DEBUG] Hopfield gate_linear: params={gate_input_dim * gate_output_dim}")
             print(f"Initialized Gated Update mechanism.")
 
         if self.combine_method == "concat":
             self.combine_proj = nn.Linear(self.emb_dim * 2, self.emb_dim, bias=False, dtype=self.dtype)
+            print(f"[DEBUG] Hopfield combine_proj: params={self.emb_dim * 2 * self.emb_dim}")
             print("Initialized Concat combine method.")
+            
+        # Calculate and print total parameter count
+        total_params = storedpatterns_params + q_proj_params + k_proj_params + v_proj_params + self.n_heads
+        if self.update_strategy == "gated":
+            total_params += gate_input_dim * gate_output_dim
+        if self.combine_method == "concat":
+            total_params += self.emb_dim * 2 * self.emb_dim
+        print(f"[DEBUG] Hopfield total trainable parameters: {total_params}")
 
         self._clear_last_state()
 
@@ -816,6 +840,18 @@ def create_model_and_load_weights(config: dict, use_lora: bool, lora_config_dict
 
     # Initialize Hopfield memory AFTER embeddings are loaded
     model.initialize_hopfield_memory()
+    
+    # Count and examine Hopfield parameters before LoRA
+    hopfield_params = 0
+    print("\n===== EXAMINING HOPFIELD PARAMETERS =====")
+    for name, p in model.named_parameters():
+        if 'hopfield_memory' in name:
+            requires_grad = p.requires_grad
+            param_size = p.numel()
+            hopfield_params += param_size
+            print(f"  {name}: shape={p.shape}, size={param_size}, requires_grad={requires_grad}")
+    print(f"Total Hopfield parameters: {hopfield_params}")
+    print("========================================\n")
 
     # Apply LoRA AFTER loading base weights and initializing Hopfield
     if use_lora:
@@ -839,13 +875,39 @@ def create_model_and_load_weights(config: dict, use_lora: bool, lora_config_dict
         peft_config.target_modules = list(scratch_target_modules)
         print(f"Applying LoRA to modules: {peft_config.target_modules}")
 
-        # Apply PEFT to the model
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
-        # Ensure Hopfield parameters remain trainable if LoRA is applied
+        # Save original requires_grad state of Hopfield parameters
+        hopfield_params_state = {}
         for name, param in model.named_parameters():
             if 'hopfield_memory' in name:
+                hopfield_params_state[name] = param.requires_grad
+
+        # Apply PEFT to the model
+        model = get_peft_model(model, peft_config)
+        
+        # Ensure Hopfield parameters remain trainable if LoRA is applied
+        hopfield_trainable_count = 0
+        print("\n===== CHECKING HOPFIELD PARAMETERS AFTER LORA =====")
+        for name, param in model.named_parameters():
+            if any(hf_name in name for hf_name in ['hopfield_memory', 'hopfield_']):
+                old_requires_grad = param.requires_grad
                 param.requires_grad = True
+                param_count = param.numel()
+                hopfield_trainable_count += param_count
+                print(f"  {name}: shape={param.shape}, size={param_count}, was_trainable={old_requires_grad}, now_trainable={param.requires_grad}")
+        
+        print(f"Made {hopfield_trainable_count} Hopfield parameters trainable after LoRA application")
+        print("================================================\n")
+        
+        # Verify parameter status
+        frozen_hopfield = []
+        for name, param in model.named_parameters():
+            if 'hopfield_memory' in name and not param.requires_grad:
+                frozen_hopfield.append(name)
+        
+        if frozen_hopfield:
+            print(f"WARNING: Some Hopfield parameters are still frozen: {frozen_hopfield}")
+        
+        model.print_trainable_parameters()
 
 
     print("Model creation and weight loading complete.")
