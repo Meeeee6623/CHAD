@@ -1,0 +1,29 @@
+2025-04-21 22:41:34.061323: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-04-21 22:41:34.080500: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1745289694.102255 1710153 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1745289694.108897 1710153 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1745289694.127417 1710153 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1745289694.127449 1710153 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1745289694.127456 1710153 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1745289694.127462 1710153 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-04-21 22:41:34.132636: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/huggingface_hub/file_download.py:896: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
+  warnings.warn(
+/home/pl217/continualearning/model.py:830: UserWarning: Weight loading missing non-Hopfield keys: ['out_head.weight']
+  if missing: warnings.warn(f"Weight loading missing non-Hopfield keys: {missing}")
+Traceback (most recent call last):
+  File "/home/pl217/continualearning/train.py", line 839, in <module>
+    train(config_file, args.resume_from_checkpoint)
+  File "/home/pl217/continualearning/train.py", line 290, in train
+    model, config = create_model_and_load_weights(config, use_lora=config.get("use_lora"), lora_config_dict=lora_config_dict)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/continualearning/model.py", line 841, in create_model_and_load_weights
+    model.initialize_hopfield_memory()
+  File "/home/pl217/continualearning/model.py", line 693, in initialize_hopfield_memory
+    if not self.hopfield_memory._initialized:
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pl217/miniconda3/envs/simpler_env/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1931, in __getattr__
+    raise AttributeError(
+AttributeError: 'HopfieldMemoryLayer' object has no attribute '_initialized'

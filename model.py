@@ -233,44 +233,50 @@ class TransformerBlock(nn.Module):
 
 # --- Hopfield Layer (Refined version) ---
 class HopfieldMemoryLayer(nn.Module):
-    # (Use the refined HopfieldMemoryLayer class from previous response)
-    # Ensure RMSNorm is used if base uses it
     def __init__(self, cfg):
         super().__init__()
-        self.config = cfg # Store config SimpleNamespace directly
-        self.emb_dim = cfg.emb_dim
-        self.n_heads = cfg.hopfield_heads
-        self.n_memory_slots = cfg.hopfield_memory_slots
-        self.pattern_dim = cfg.emb_dim
-        self.head_dim = self.pattern_dim // self.n_heads
-        if self.head_dim * self.n_heads != self.pattern_dim:
-             raise ValueError("emb_dim must be divisible by hopfield_heads")
-
-        self.num_updates = cfg.hopfield_num_updates
-        # Use getattr for optional config keys to provide defaults
-        self.update_strategy = getattr(cfg, "hopfield_update_strategy", "none")
-        self.memory_update_lr = getattr(cfg, "hopfield_memory_update_lr", 0.01)
-        self.gate_input_pooling = getattr(cfg, "hopfield_gate_input_pooling", "mean")
-        self.update_target_method = getattr(cfg, "hopfield_update_target_method", "avg_query")
-        self.clamp_patterns = getattr(cfg, "hopfield_clamp_patterns", None) # Default None
-        self.clamp_beta = getattr(cfg, "hopfield_clamp_beta", 10.0)
-        self.combine_method = getattr(cfg, "hopfield_combine_method", "add")
-        self.init_method = getattr(cfg, "hopfield_init_method", "random")
-        self.dtype = getattr(cfg, "dtype", torch.float32) # Default float32
-
+        self.cfg = cfg
+        
+        # Memory parameters
+        self.n_heads = cfg.get("hopfield_n_heads", cfg.get("n_heads", 16))  # Default to model heads if not specified
+        self.head_dim = cfg.get("hopfield_head_dim", cfg.get("head_dim", 128))  # Default to model head_dim if not specified
+        self.pattern_dim = self.head_dim  # Hopfield pattern dimension = head dimension
+        self.n_slots = cfg.get("hopfield_memory_slots", 512)  # Reduced from 1024 to 512 for memory efficiency
+        self.update_strategy = cfg.get("hopfield_update_strategy", "none") # gated, persistent, none
+        self.memory_update_lr = cfg.get("hopfield_memory_update_lr", 0.01)
+        self.init_method = cfg.get("hopfield_init_method", "normal") # normal, zero, ones, xavier_normal, xavier_uniform
+        self.init_scale = cfg.get("hopfield_init_scale", 0.02)
+        self.clamp_patterns = cfg.get("hopfield_clamp_patterns", None)
+        self.combine_method = cfg.get("hopfield_combine_method", "add")  # add, gated_add, concat
+        self.update_target_method = cfg.get("hopfield_update_target", "avg_query")  # avg_query, avg_retrieved
+        self.num_updates = cfg.get("hopfield_num_updates", 1)  # Number of update steps for memory retrieval
+        self.gate_input_pooling = cfg.get("hopfield_gate_input_pooling", "mean")  # mean, max
+        
+        # Explicitly initialize the _initialized attribute
+        self._initialized = False
+        
+        # Explicitly set attributes needed for forward method
+        self.emb_dim = cfg.get("emb_dim", 3072)  # Model's embedding dimension
+        self.dtype = cfg.get("dtype", torch.float16)  # Model's data type
+        self.n_memory_slots = self.n_slots  # Alias for backward compatibility
+        self.clamp_beta = cfg.get("hopfield_clamp_beta", 10.0)  # Beta parameter for clamping
+        
+        # Parameter for memory
         self.storedpatterns = nn.Parameter(
-            torch.empty(self.n_heads, self.n_memory_slots, self.head_dim, dtype=self.dtype)
+            torch.zeros(self.n_heads, self.n_slots, self.pattern_dim),
+            requires_grad=cfg.get("hopfield_learn_patterns", False)
         )
         
         # Print debug information about parameter sizes
         storedpatterns_params = self.n_heads * self.n_memory_slots * self.head_dim
         print(f"[DEBUG] Hopfield storedpatterns: shape={self.storedpatterns.shape}, params={storedpatterns_params}")
         
-        self._initialized = False
-
-        self.q_proj = nn.Linear(self.emb_dim, self.pattern_dim, bias=False, dtype=self.dtype)
-        self.k_proj = nn.Linear(self.head_dim, self.head_dim, bias=False, dtype=self.dtype)
-        self.v_proj = nn.Linear(self.head_dim, self.head_dim, bias=False, dtype=self.dtype)
+        
+        # Core projection matrices
+        self.q_proj = nn.Linear(self.emb_dim, self.n_heads * self.head_dim, bias=cfg.get("hopfield_use_bias", False), dtype=self.dtype)
+        self.k_proj = nn.Linear(self.head_dim, self.head_dim, bias=cfg.get("hopfield_use_bias", False), dtype=self.dtype)
+        self.v_proj = nn.Linear(self.head_dim, self.head_dim, bias=cfg.get("hopfield_use_bias", False), dtype=self.dtype)
+        
         
         # Print linear layer parameter counts
         q_proj_params = self.emb_dim * self.pattern_dim
@@ -280,35 +286,30 @@ class HopfieldMemoryLayer(nn.Module):
         print(f"[DEBUG] Hopfield k_proj: params={k_proj_params}")
         print(f"[DEBUG] Hopfield v_proj: params={v_proj_params}")
         
-        # Correct beta shape for broadcasting: [1, H_hop, 1, 1]
+        # Beta parameter for scaled attention
         self.beta = nn.Parameter(torch.ones(1, self.n_heads, 1, 1, dtype=self.dtype))
-
-        # Match Norm type with base model
+        
+        # Add RMSNorm for query input before projection
         self.norm_query = RMSNorm(self.emb_dim, eps=cfg.get("rms_norm_eps", 1e-5), dtype=self.dtype)
-        self.norm_retrieved = RMSNorm(self.emb_dim, eps=cfg.get("rms_norm_eps", 1e-5), dtype=self.dtype)
-
-
-        if self.update_strategy == "gated":
-            gate_input_dim = self.emb_dim * 2
-            gate_output_dim = self.n_heads * self.n_memory_slots * self.head_dim
-            self.gate_linear = nn.Linear(gate_input_dim, gate_output_dim, bias=False, dtype=self.dtype)
-            print(f"[DEBUG] Hopfield gate_linear: params={gate_input_dim * gate_output_dim}")
-            print(f"Initialized Gated Update mechanism.")
-
+        self.norm_retrieved = RMSNorm(self.n_heads * self.head_dim, dtype=self.dtype)
+        
+        # For combine_method=='concat' we need a projection
         if self.combine_method == "concat":
-            self.combine_proj = nn.Linear(self.emb_dim * 2, self.emb_dim, bias=False, dtype=self.dtype)
-            print(f"[DEBUG] Hopfield combine_proj: params={self.emb_dim * 2 * self.emb_dim}")
-            print("Initialized Concat combine method.")
-            
-        # Calculate and print total parameter count
-        total_params = storedpatterns_params + q_proj_params + k_proj_params + v_proj_params + self.n_heads
+            self.combine_proj = nn.Linear(2 * self.n_heads * self.head_dim, self.n_heads * self.head_dim, bias=False, dtype=self.dtype)
+        
+        # For gated_add combine method, we need a gating projection
+        if self.combine_method == "gated_add":
+            self.combine_gate_proj = nn.Linear(2 * self.n_heads * self.head_dim, self.n_heads * self.head_dim, bias=True, dtype=self.dtype)
+        
+        # For gated update strategy, we need a gate
         if self.update_strategy == "gated":
-            total_params += gate_input_dim * gate_output_dim
-        if self.combine_method == "concat":
-            total_params += self.emb_dim * 2 * self.emb_dim
-        print(f"[DEBUG] Hopfield total trainable parameters: {total_params}")
-
-        self._clear_last_state()
+            self.gate_linear = nn.Linear(2 * self.n_heads * self.head_dim, self.n_heads * self.n_slots, bias=True, dtype=self.dtype)
+        
+        # Bookkeeping for updates
+        self._last_attn_weights = None
+        self._last_query_input = None 
+        self._last_query_proj = None
+        self._last_retrieved_memory_norm = None
 
     def initialize_memory(self, embedding_matrix: Optional[torch.Tensor] = None):
         # (Same as previous implementation)
@@ -354,12 +355,31 @@ class HopfieldMemoryLayer(nn.Module):
         query_norm = self.norm_query(query_input)
         query = self.q_proj(query_norm)
         query = query.view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
-
+        
+        # Move storedpatterns to correct device and dtype
         storedpatterns_device = self.storedpatterns.to(device=device, dtype=self.dtype)
-        keys_flat = self.k_proj(storedpatterns_device.view(-1, self.head_dim))
-        values_flat = self.v_proj(storedpatterns_device.view(-1, self.head_dim))
-        keys = keys_flat.view(1, self.n_heads, self.n_memory_slots, self.head_dim)
-        values = values_flat.view(1, self.n_heads, self.n_memory_slots, self.head_dim)
+        
+        # Process each memory slot with the k_proj and v_proj separately
+        # This avoids the dimension mismatch between storedpatterns and projection layers
+        keys = []
+        values = []
+        
+        # Process each head's patterns separately for keys and values
+        for h in range(self.n_heads):
+            head_patterns = storedpatterns_device[h]  # [n_slots, head_dim]
+            # Apply projections to each memory slot
+            head_keys = self.k_proj(head_patterns)  # [n_slots, head_dim]
+            head_values = self.v_proj(head_patterns)  # [n_slots, head_dim]
+            keys.append(head_keys)
+            values.append(head_values)
+            
+        # Stack the processed keys and values
+        keys = torch.stack(keys, dim=0)  # [n_heads, n_slots, head_dim]
+        values = torch.stack(values, dim=0)  # [n_heads, n_slots, head_dim]
+        
+        # Add batch dimension for broadcasting
+        keys = keys.unsqueeze(0)  # [1, n_heads, n_slots, head_dim]
+        values = values.unsqueeze(0)  # [1, n_heads, n_slots, head_dim]
 
         current_query = query
         if self.clamp_beta is not None:
@@ -377,7 +397,7 @@ class HopfieldMemoryLayer(nn.Module):
         # === END DEBUG Hopfield ===
 
         # Ensure contiguous before reshape
-        final_retrieved_reshaped = retrieved_memory_t.contiguous().reshape(batch_size, seq_len, self.pattern_dim)
+        final_retrieved_reshaped = retrieved_memory_t.contiguous().reshape(batch_size, seq_len, self.n_heads * self.head_dim)
         final_retrieved_norm = self.norm_retrieved(final_retrieved_reshaped)
 
         if self.training or self.update_strategy != "none":
@@ -386,14 +406,8 @@ class HopfieldMemoryLayer(nn.Module):
             self._last_query_proj = query.detach()
             self._last_retrieved_memory_norm = final_retrieved_norm.detach()
 
-        if self.combine_method == "concat":
-            combined = torch.cat((query_input, final_retrieved_norm), dim=-1)
-            output = self.combine_proj(combined.to(self.combine_proj.weight.dtype))
-        else:
-            if self.combine_method != "add": warnings.warn(f"Unknown combine: {self.combine_method}, using add.")
-            output = query_input + final_retrieved_norm
-
-        return output.to(query_input_dtype)
+        # Call the appropriate combination method
+        return self._combine_memory_with_output(final_retrieved_norm, query_input)
 
     def update_memory(self):
         # (Use the update_memory logic from the previous response)
@@ -477,6 +491,35 @@ class HopfieldMemoryLayer(nn.Module):
         # Optional: Reset any other state if needed (e.g., accumulated statistics)
         print("Hopfield memory state cleared.")
 
+    def _combine_memory_with_output(self, memory_output, original_output):
+        """
+        Combines memory output with original output based on combine_method
+        """
+        original_dtype = original_output.dtype  # Store original dtype for conversion at end
+        
+        if self.combine_method == "add":
+            # Simple addition
+            combined = memory_output + original_output
+        
+        elif self.combine_method == "gated_add":
+            # Concatenate for gating
+            combined = torch.cat([memory_output, original_output], dim=-1)
+            # Calculate gate value with sigmoid for smooth interpolation
+            gates = torch.sigmoid(self.combine_gate_proj(combined))
+            # Use gate to combine outputs
+            combined = gates * memory_output + (1 - gates) * original_output
+        
+        elif self.combine_method == "concat":
+            # Concatenate and project
+            concat_input = torch.cat([memory_output, original_output], dim=-1)
+            combined = self.combine_proj(concat_input)
+        
+        else:
+            warnings.warn(f"Unknown combine method: {self.combine_method}. Using 'add' instead.")
+            combined = memory_output + original_output
+            
+        # Return with original dtype for consistency
+        return combined.to(original_dtype)
 
 # --- HAT Model (Using scratch structure) ---
 class HopfieldLlama3Model(nn.Module, GenerationMixin):

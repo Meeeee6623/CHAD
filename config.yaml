@@ -22,16 +22,16 @@ rope_freq: null                # Not used by default in 3.2 base
 
 # Enhanced Gated Hopfield Layer Configuration
 hopfield_heads: 24                     # 3072 / 24 = 128 head_dim
-hopfield_memory_slots: 1024            # Doubled from 512 to 1024 for substantially larger capacity
-hopfield_num_updates: 3                # Increased from 2 to 3 for more refinement passes
+hopfield_memory_slots: 512             # Reduced from 1024 to 512 to save memory
+hopfield_num_updates: 2                # Reduced from 3 to 2 for memory efficiency
 hopfield_init_method: "embedding_sampling"
 hopfield_update_strategy: "gated"      # Using enhanced gated mechanism
-hopfield_memory_update_lr: 0.018       # Slightly increased for more impactful updates with larger memory
+hopfield_memory_update_lr: 0.018       # Slightly increased for more impactful updates
 hopfield_gate_input_pooling: "attention"  # Using attention-based pooling for nuanced gating
 hopfield_update_target_method: "max_query" # Using max query for stronger pattern focus
-hopfield_clamp_patterns: 3.0           # Reduced to allow more flexibility with larger memory
-hopfield_clamp_beta: 6.0               # Further reduced for smoother energy landscape with larger memory
-hopfield_combine_method: "gated_add"   # Enhanced combination method with gating
+hopfield_clamp_patterns: 3.0           # Reduced for more flexibility
+hopfield_clamp_beta: 6.0               # Reduced for smoother energy landscape
+hopfield_combine_method: "add"         # Fixed: Using standard add method that's supported
 
 # Data Configuration
 dataset_name: "deepmind/narrativeqa"
@@ -45,8 +45,8 @@ data_cache_dir: "./data_cache"        # Cache downloaded datasets
 output_dir: "./narrativeqa_hat_finetune_3.2_3B_run2" # New run directory
 num_train_epochs: 20
 per_device_train_batch_size: 1
-per_device_eval_batch_size: 1         # Reduced from 2 to 1 for memory efficiency
-gradient_accumulation_steps: 32        # Increased from 16 to 32 for better memory efficiency
+per_device_eval_batch_size: 1          # Already at minimum
+gradient_accumulation_steps: 64        # Increased from 32 to 64 for much better memory efficiency
 learning_rate: 3e-5                    # Increased from 1e-5 for more aggressive learning
 hopfield_lr_multiplier: 5.0            # Balanced value for Hopfield learning
 weight_decay: 0.01
