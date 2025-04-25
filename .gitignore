@@ -1,3 +1,21 @@
 /data_cache
 /narrativeqa_hat_finetune_3.2_3B_run1
 
+# SLURM output files
+*.out
+*.err
+
+# model checkpoints
+narrativeqa_hat_finetune_3.2_3B_run*
+
+# wandb
+wandb/
+
+# triton-backup
+triton-backup/
+
+# onnx_model
+onnx_model/
+
+# pytorch_model
+pytorch_model/
