@@ -1,0 +1,80 @@
+{
+  "name": "%3",
+  "directed": true,
+  "strict": false,
+  "_draw_": 
+  [
+    {
+      "op": "c",
+      "grad": "none",
+      "color": "#fffffe00"
+    },
+    {
+      "op": "C",
+      "grad": "none",
+      "color": "#ffffff"
+    },
+    {
+      "op": "P",
+      "points": [[0.000,0.000],[0.000,32.000],[70.160,32.000],[70.160,0.000]]
+    }
+  ],
+  "bb": "0,0,70.16,32",
+  "size": "12,12",
+  "xdotversion": "1.7",
+  "_subgraph_cnt": 0,
+  "objects": [
+    {
+      "_gvid": 0,
+      "name": "140529458957008",
+      "_draw_": 
+      [
+        {
+          "op": "c",
+          "grad": "none",
+          "color": "#000000"
+        },
+        {
+          "op": "C",
+          "grad": "none",
+          "color": "#caff70"
+        },
+        {
+          "op": "P",
+          "points": [[70.160,32.000],[0.000,32.000],[0.000,0.000],[70.160,0.000]]
+        }
+      ],
+      "_ldraw_": 
+      [
+        {
+          "op": "F",
+          "size": 10.000,
+          "face": "monospace"
+        },
+        {
+          "op": "c",
+          "grad": "none",
+          "color": "#000000"
+        },
+        {
+          "op": "T",
+          "pt": [35.080,7.000],
+          "align": "c",
+          "width": 54.160,
+          "text": " (1, 10, 3072)"
+        }
+      ],
+      "align": "left",
+      "fillcolor": "darkolivegreen1",
+      "fontname": "monospace",
+      "fontsize": "10",
+      "height": "0.44444",
+      "label": "\n (1, 10, 3072)",
+      "pos": "35.08,16",
+      "ranksep": "0.1",
+      "shape": "box",
+      "style": "filled",
+      "width": "0.97445"
+    }
+  ]
+}

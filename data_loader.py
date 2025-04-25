@@ -132,8 +132,15 @@ class NarrativeQADataset(Dataset):
                     print(f"Complete answer length: {len(answer_text)}")
 
                 # --- Encode Summary directly ---
-                # Encode summary without special tokens initially
-                summary_tokens = self.tokenizer.encode(summary_text, add_special_tokens=False)
+                # Use tokenizer's __call__ method instead of encode
+                summary_encoding = self.tokenizer(
+                    summary_text, 
+                    add_special_tokens=False, 
+                    return_tensors=None,
+                    return_attention_mask=False
+                )
+                summary_tokens = summary_encoding["input_ids"]
+                
                 if not summary_tokens: # Skip if summary encoding is empty
                     # print(f"Skipping example {doc_id}: Empty summary encoding.")
                     num_skipped += 1; continue
@@ -153,9 +160,24 @@ class NarrativeQADataset(Dataset):
                     # Fallback for tokenizers without chat template
                     warnings.warn(f"Chat template application failed: {e}. Using basic format.")
                     qa_formatted_text = f"User: {question_text}\nAssistant: "
-                    
-                qa_prompt_tokens = self.tokenizer.encode(qa_formatted_text, add_special_tokens=False) # No BOS/EOS here
-                answer_tokens = self.tokenizer.encode(answer_text, add_special_tokens=False) # No BOS/EOS here
+                
+                # Use tokenizer's __call__ method for qa_prompt_tokens
+                qa_prompt_encoding = self.tokenizer(
+                    qa_formatted_text,
+                    add_special_tokens=False,
+                    return_tensors=None,
+                    return_attention_mask=False
+                )
+                qa_prompt_tokens = qa_prompt_encoding["input_ids"]
+                
+                # Use tokenizer's __call__ method for answer_tokens
+                answer_encoding = self.tokenizer(
+                    answer_text,
+                    add_special_tokens=False,
+                    return_tensors=None,
+                    return_attention_mask=False
+                )
+                answer_tokens = answer_encoding["input_ids"]
 
                 # Add EOS token to answer if tokenizer has one and it's not already there
                 if self.tokenizer.eos_token_id is not None and (not answer_tokens or answer_tokens[-1] != self.tokenizer.eos_token_id):
@@ -318,14 +340,18 @@ def collate_fn(batch, tokenizer, max_length):
             # This resize should happen in the main train script after tokenizer is loaded
             warnings.warn("Tokenizer missing EOS and PAD token. Added '[PAD]'. Ensure model embeddings are resized.")
 
-
-    # Pad inputs using tokenizer.pad
+    # Since we already have token IDs, we need to use pad() instead of __call__
+    # Create a dictionary with input_ids
+    encoding_dict = {"input_ids": input_ids}
+    
+    # Use pad method which is designed to work with existing token IDs
     padded_inputs = tokenizer.pad(
-        {"input_ids": input_ids},
-        padding="longest", # Pad to longest in batch
-        max_length=max_length, # Ensure not exceeding max_length
-        return_tensors="pt",
+        encoding_dict,
+        padding="longest",          # Pad to longest in batch
+        max_length=max_length,      # Ensure not exceeding max_length
+        return_tensors="pt",        # Return PyTorch tensors
         return_attention_mask=True, # Ensure attention mask is returned
+        pad_to_multiple_of=None     # No need to pad to multiple
     )
 
     # Pad labels manually to match the padded input length

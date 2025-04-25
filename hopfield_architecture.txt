@@ -1,0 +1,24 @@
+=== Hopfield LLM Architecture ===
+
+Vocabulary Size: 128256
+Embedding Dimension: 3072
+Number of Layers: 28
+Number of Attention Heads: 24
+Number of KV Groups: 8
+Hidden Dimension: 8192
+Context Length: 4096
+
+=== Hopfield Memory Configuration ===
+use_hopfield_memory: True
+hopfield_heads: 24
+hopfield_memory_slots: 128
+hopfield_num_updates: 2
+hopfield_init_method: embedding_sampling
+hopfield_update_strategy: gated
+hopfield_memory_update_lr: 0.018
+hopfield_gate_input_pooling: attention
+hopfield_update_target_method: max_query
+hopfield_clamp_patterns: 3.0
+hopfield_clamp_beta: 6.0
+hopfield_combine_method: gated_add
+hopfield_lr_multiplier: 5.0

@@ -23,7 +23,7 @@ rope_freq: null                # Not used by default in 3.2 base
 # Enhanced Gated Hopfield Layer Configuration
 use_hopfield_memory: True            # Enable Hopfield memory layer
 hopfield_heads: 24                     # 3072 / 24 = 128 head_dim
-hopfield_memory_slots: 128             # Reduced from 1024 to 512 to save memory
+hopfield_memory_slots: 768             # Reduced from 1024 to 512 to save memory
 hopfield_num_updates: 2                # Reduced from 3 to 2 for memory efficiency
 hopfield_init_method: "embedding_sampling"
 initialize_memory_from_embedding: True # Ensure memory is initialized from embedding matrix
@@ -58,9 +58,9 @@ adam_epsilon: 1e-8
 max_grad_norm: 1.0                    # Gradient clipping
 lr_scheduler_type: "cosine"
 warmup_ratio: 0.08                    # Intermediate warmup ratio
-logging_steps: 20                    
-save_steps: 900
-eval_steps: 900
+logging_steps: 20                     
+save_steps: 20
+eval_steps: 20
 seed: 42
 gradient_checkpointing: True          # Enable gradient checkpointing
 

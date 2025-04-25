@@ -4,30 +4,53 @@ import os
 import argparse
 from tqdm.auto import tqdm
 from transformers import GenerationConfig
+from collections import defaultdict
+import wandb  # Add wandb import
 
 # Local imports
 from model import HopfieldLlama3Model, create_model_and_load_weights # Re-use model creation logic
 from tokenizer_utils import get_tokenizer
 from data_loader import get_dataloader # Use the updated data loader
 from peft import PeftModel # For loading LoRA adapters
+from utils import compute_metrics, init_metrics  # Import metrics functions
 
 # Suppress warnings
 import warnings
 warnings.filterwarnings("ignore", message=".*Torch was not compiled with flash attention.*")
 warnings.filterwarnings("ignore", message=".*does not support gradient checkpointing*")
 
-def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=False):
+def run_inference(config_path, checkpoint_dir, num_stories=3, examples_per_story=3, memory_only_test=False, use_wandb=False, wandb_run_name=None):
     """Runs inference on the test set using a saved checkpoint.
     
     Args:
         config_path: Path to config file
         checkpoint_dir: Path to model checkpoint directory
-        num_examples: Number of examples to process
+        num_stories: Number of unique stories/documents to process
+        examples_per_story: Number of examples per story to process
         memory_only_test: If True, tests memory by providing only question without context in Stage 2
+        use_wandb: Whether to log results to Weights & Biases
+        wandb_run_name: Optional custom name for the wandb run
     """
     # --- Load Config --- #
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
+        
+    # --- Initialize WandB if requested --- #
+    if use_wandb:
+        print("Initializing Weights & Biases for inference logging...")
+        wandb.init(
+            project=config.get('wandb_project', 'ECE 661'),
+            entity=config.get('wandb_entity', 'benjamin-chauhan-usyd'),
+            name=wandb_run_name or f"inference_{os.path.basename(checkpoint_dir)}",
+            config={
+                "checkpoint": checkpoint_dir,
+                "num_stories": num_stories,
+                "examples_per_story": examples_per_story,
+                "memory_only_test": memory_only_test,
+                **config  # Include all config parameters
+            }
+        )
+        print(f"WandB initialized with run name: {wandb.run.name}")
 
     # --- Device Setup --- #
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -128,17 +151,21 @@ def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=
         raise ValueError("Failed to load test data. Check dataset availability and data_loader.py.")
     print(f"Test dataset loaded with {len(test_dataloader.dataset)} examples.")
 
-    # --- Inference Loop --- #
-    results = []
+    # --- Prepare for Story-based Sampling --- #
+    print(f"Will process {num_stories} stories with {examples_per_story} examples per story")
     if memory_only_test:
-        print(f"Running MEMORY-ONLY inference test on first {num_examples} examples...")
         print("NOTICE: Stage 2 will ONLY see the question without context to test memory retention")
-    else:
-        print(f"Running standard inference on first {num_examples} examples...")
     
-    count = 0
-    for batch in tqdm(test_dataloader, desc="Inference", total=min(num_examples, len(test_dataloader.dataset)) // config['per_device_eval_batch_size'] + 1):
-        if count >= num_examples: break
+    # Track stories and examples per story
+    story_counts = defaultdict(int)  # Counts examples per document/story
+    processed_stories = 0  # Number of unique stories processed
+    results = []  # To store all results
+    
+    # --- Inference Loop --- #
+    print("Starting inference loop...")
+    for batch in tqdm(test_dataloader, desc="Inference"):
+        if processed_stories >= num_stories:
+            break  # We've processed the requested number of stories
 
         input_ids = batch['input_ids'].to(device)
         attention_mask = batch['attention_mask'].to(device)
@@ -150,18 +177,30 @@ def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=
         batch_size = input_ids.shape[0]
 
         for i in range(batch_size):
-            if count >= num_examples: break
-
-            current_input_ids = input_ids[i:i+1] # Keep batch dim
+            current_doc_id = doc_ids[i]
+            
+            # Skip if we already have enough examples for this story
+            if story_counts[current_doc_id] >= examples_per_story:
+                continue
+                
+            # Skip if we've already processed enough unique stories
+            if processed_stories >= num_stories and current_doc_id not in story_counts:
+                continue
+                
+            # We're processing a new story
+            if current_doc_id not in story_counts:
+                processed_stories += 1
+            
+            # Process this example
+            current_input_ids = input_ids[i:i+1]  # Keep batch dim
             current_attention_mask = attention_mask[i:i+1]
             current_labels = labels[i]
             current_context_end_idx = context_end_idx_tensor[i].item()
-            current_doc_id = doc_ids[i]
             current_answer_text = answer_texts[i]
 
             # --- Debugging Labels Tensor in Inference ---
-            if i == 0 and count == 0: # Print only for the very first example
-                print(f"\n--- INFERENCE LABEL DEBUG (Example {count+1}) ---")
+            if i == 0 and len(results) == 0:  # Print only for the very first example
+                print(f"\n--- INFERENCE LABEL DEBUG (First Example) ---")
                 print(f"Raw labels shape for this item: {current_labels.shape}")
                 # Get the part of labels that should contain the answer
                 # Move labels to the same device as the indices for indexing
@@ -191,7 +230,7 @@ def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=
                     question_tokens = current_input_ids[:, current_context_end_idx:]
                     # Verify we have question tokens
                     if question_tokens.shape[1] == 0:
-                        print(f"WARNING: No question tokens found for example {count+1}, skipping")
+                        print(f"WARNING: No question tokens found for example {current_doc_id}-{story_counts[current_doc_id]+1}, skipping")
                         continue
                 
                 # Reset Hopfield memory before processing context
@@ -234,7 +273,7 @@ def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=
                     
                     # The key is to create position IDs starting from context_end_idx
                     # So the model sees these positions as a continuation
-                    print(f"\nExample {count+1}: Testing MEMORY ONLY with question (no context)")
+                    print(f"\nExample {current_doc_id}-{story_counts[current_doc_id]+1}: Testing MEMORY ONLY with question (no context)")
                     print(f"  Question tokens shape: {question_tokens.shape}, Context length: {context_length}")
                 else:
                     # Standard mode: use full prompt including context
@@ -245,7 +284,7 @@ def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=
                 # MODIFICATION: Directly use fallback for memory_only_test due to persistent issues
                 if memory_only_test:
                     try:
-                        print(f"Using fallback generation method directly for memory-only example {count+1}")
+                        print(f"Using fallback generation method directly for memory-only example {current_doc_id}-{story_counts[current_doc_id]+1}")
                         # Create a copy of input to avoid modifying the original
                         current_tokens = prompt_tokens.clone()
                         generated_text_pieces = []
@@ -298,7 +337,7 @@ def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=
                                 
                         # Combine the generated pieces
                         generated_text = ''.join(generated_text_pieces).strip()
-                        print(f"Fallback generation succeeded for example {count+1}")
+                        print(f"Fallback generation succeeded for example {current_doc_id}-{story_counts[current_doc_id]+1}")
                     except Exception as fallback_error:
                         print(f"Fallback generation failed: {fallback_error}")
                         generated_text = "[Generation failed due to an error]"
@@ -326,7 +365,7 @@ def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=
                         generated_ids = outputs[0, prompt_tokens.shape[1]:]
                         generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
                     except Exception as e:
-                        print(f"Error during standard generation for example {count+1}: {e}")
+                        print(f"Error during standard generation for example {current_doc_id}-{story_counts[current_doc_id]+1}: {e}")
                         # Provide a placeholder response if generation fails
                         generated_text = "[Generation failed due to an error]"
 
@@ -349,87 +388,192 @@ def run_inference(config_path, checkpoint_dir, num_examples=5, memory_only_test=
             reference_text = current_answer_text
             
             # Debug print for the first example to check fix
-            if count == 0:
+            if len(results) == 0:
                 print("\n--- FIXED REFERENCE ANSWER EXTRACTION (First Example) ---")
-                # No need to print reference_labels tokens anymore
-                # print(f"Reference answer token IDs: {reference_labels.tolist()}") 
                 print(f"Decoded reference answer (from stored text): '{reference_text}'")
                 # Move to CPU for consistent handling
                 # Ensure current_labels_device exists and is on device before indexing
                 current_labels_device = current_labels.to(device)
                 orig_labels = current_labels_device[current_labels_device != -100]
                 orig_text = tokenizer.decode(orig_labels.cpu(), skip_special_tokens=True)
-                # print(f"Original method would return: '{orig_text}'") # Debug print no longer needed
                 print("-------------------------------------------------------\n")
 
-            results.append({
+            # Create a result dictionary with all relevant information
+            result_dict = {
                 "doc_id": current_doc_id,
+                "example_num": story_counts[current_doc_id] + 1,  # 1-indexed for display
                 "summary_context": context_text,
                 "prompt": prompt_text_full,
                 "prompt_without_context": conversation_format,
                 "reference_answer": reference_text,
                 "generated_answer": generated_text,
                 "memory_only_test": memory_only_test
-            })
-            count += 1
+            }
+            
+            results.append(result_dict)
+            
+            # Log individual result to wandb if enabled
+            if use_wandb:
+                # Compute metrics for this single example
+                init_metrics()  # Ensure metrics are initialized
+                single_prediction = [[ord(c) for c in generated_text]]  # Convert to token IDs format expected by compute_metrics
+                single_reference = [[ord(c) for c in reference_text]]
+                try:
+                    metrics = compute_metrics(single_prediction, single_reference, tokenizer)
+                    
+                    # Log to wandb with metrics
+                    wandb.log({
+                        f"example_{current_doc_id}_{story_counts[current_doc_id]}": {
+                            "prompt": conversation_format,
+                            "reference": reference_text,
+                            "prediction": generated_text,
+                            "rouge1": metrics.get("rouge1", 0),
+                            "rouge2": metrics.get("rouge2", 0),
+                            "rougeL": metrics.get("rougeL", 0),
+                            "bleu": metrics.get("bleu", 0),
+                            "exact_match": metrics.get("exact_match", 0),
+                            "memory_only": memory_only_test
+                        }
+                    })
+                except Exception as e:
+                    print(f"Error computing metrics for wandb logging: {e}")
+            
+            # Increment the count for this story
+            story_counts[current_doc_id] += 1
+            
+            # Break if we have enough examples for this story
+            if story_counts[current_doc_id] >= examples_per_story:
+                print(f"Completed all {examples_per_story} examples for story {current_doc_id}")
 
     # --- Print Final Results Summary --- #
     print("\n--- Inference Results ---")
+    print(f"Processed {len(story_counts)} unique stories with up to {examples_per_story} examples each")
     if memory_only_test:
         print("MEMORY-ONLY TEST: Model was given ONLY the question without context in Stage 2")
     
-    for i, res in enumerate(results):
-        print(f"--- Example {i+1} ---")
-        print(f"Doc ID: {res['doc_id']}")
-        print(f"Summary Context Used (Stage 1 only):\n{res['summary_context']}")
-        print(f"\nQuestion (given to model {'WITHOUT context' if res.get('memory_only_test') else 'WITH context'}):")
+    # Group results by doc_id for better organization
+    for doc_id in sorted(story_counts.keys()):
+        doc_results = [r for r in results if r['doc_id'] == doc_id]
+        print(f"\n=== Story: {doc_id} (Processed {len(doc_results)} examples) ===")
         
-        # Question extraction logic remains the same...
-        question_found = False
+        # Print context only once per story (assuming it's the same for all examples)
+        if doc_results:
+            print(f"Summary Context Used (Stage 1 only):\n{doc_results[0]['summary_context']}")
         
-        # Method 1: Try to extract using conversation format markers
-        for marker_set in [
-            ("<|start_header_id|>user<|end_header_id|>\n\n", "<|eot_id|>"), 
-            ("<user>", "</user>"),
-            ("[INST]", "[/INST]")
-        ]:
-            start_marker, end_marker = marker_set
-            if start_marker in res['prompt']:
-                q_parts = res['prompt'].split(start_marker)
-                if len(q_parts) > 1:
-                    if end_marker in q_parts[1]:
-                        q_text = q_parts[1].split(end_marker)[0].strip()
-                        print(q_text)
-                        question_found = True
-                        break
+        # Print each example for this story
+        for res in sorted(doc_results, key=lambda x: x['example_num']):
+            print(f"\n--- Example {res['example_num']} ---")
+            print(f"Question (given to model {'WITHOUT context' if res.get('memory_only_test') else 'WITH context'}):")
+            
+            # Question extraction logic remains the same...
+            question_found = False
+            
+            # Method 1: Try to extract using conversation format markers
+            for marker_set in [
+                ("<|start_header_id|>user<|end_header_id|>\n\n", "<|eot_id|>"), 
+                ("<user>", "</user>"),
+                ("[INST]", "[/INST]")
+            ]:
+                start_marker, end_marker = marker_set
+                if start_marker in res['prompt']:
+                    q_parts = res['prompt'].split(start_marker)
+                    if len(q_parts) > 1:
+                        if end_marker in q_parts[1]:
+                            q_text = q_parts[1].split(end_marker)[0].strip()
+                            print(q_text)
+                            question_found = True
+                            break
+            
+            # Method 2: If the prompt_without_context was extracted successfully
+            if not question_found and res['prompt_without_context']:
+                # Try to clean up any remaining markers
+                q_text = res['prompt_without_context']
+                for marker in ["<|start_header_id|>user<|end_header_id|>", "<|eot_id|>", 
+                              "<user>", "</user>", "[INST]", "[/INST]"]:
+                    q_text = q_text.replace(marker, "")
+                print(q_text.strip())
+                question_found = True
+            
+            # Fallback message if extraction failed
+            if not question_found:
+                print("[Could not auto-extract question from prompt]")
+            
+            # Print the reference answer and generated answer with clear labels
+            print(f"\nReference Answer (Ground Truth):\n{res['reference_answer']}")
+            print(f"\nModel Generated Answer:\n{res['generated_answer']}")
+            print("-"*50)
+    
+    # Compute aggregate metrics if wandb is enabled
+    if use_wandb and results:
+        print("\nComputing aggregate metrics for all examples...")
+        init_metrics()  # Ensure metrics are initialized
         
-        # Method 2: If the prompt_without_context was extracted successfully
-        if not question_found and res['prompt_without_context']:
-            # Try to clean up any remaining markers
-            q_text = res['prompt_without_context']
-            for marker in ["<|start_header_id|>user<|end_header_id|>", "<|eot_id|>", 
-                          "<user>", "</user>", "[INST]", "[/INST]"]:
-                q_text = q_text.replace(marker, "")
-            print(q_text.strip())
-            question_found = True
+        # Prepare data for metrics computation
+        all_predictions = []
+        all_references = []
         
-        # Fallback message if extraction failed
-        if not question_found:
-            print("[Could not auto-extract question from prompt]")
+        for res in results:
+            # Convert to token IDs format expected by compute_metrics
+            # This is simplistic - in a real implementation, you might use the actual token IDs
+            pred_ids = [ord(c) for c in res['generated_answer']]
+            ref_ids = [ord(c) for c in res['reference_answer']]
+            all_predictions.append(pred_ids)
+            all_references.append(ref_ids)
         
-        # IMPORTANT: Print the correct reference answer and generated answer with clear labels
-        print(f"\nReference Answer (Ground Truth from Dataset):\n{res['reference_answer']}")
-        print(f"\nModel Generated Answer ({f'MEMORY-ONLY TEST' if res.get('memory_only_test') else 'standard inference'}):\n{res['generated_answer']}")
-        print("-"*(len(f"--- Example {i+1} ---")))
-        print("\n")
+        try:
+            # Compute metrics across all examples
+            aggregate_metrics = compute_metrics(all_predictions, all_references, tokenizer)
+            
+            # Add memory test flag to metrics
+            aggregate_metrics['memory_only_test'] = memory_only_test
+            aggregate_metrics['num_stories'] = len(story_counts)
+            aggregate_metrics['total_examples'] = len(results)
+            
+            # Log aggregate metrics to wandb
+            wandb.log({
+                "aggregate_metrics": aggregate_metrics
+            })
+            
+            print("\nAggregate Metrics:")
+            for metric_name, metric_value in aggregate_metrics.items():
+                print(f"{metric_name}: {metric_value}")
+                
+            # Create and log a table of all results
+            table_data = []
+            for res in results:
+                table_data.append([
+                    res['doc_id'],
+                    res['example_num'],
+                    res['prompt_without_context'],
+                    res['reference_answer'],
+                    res['generated_answer'],
+                    res.get('memory_only_test', False)
+                ])
+            
+            result_table = wandb.Table(
+                columns=["doc_id", "example_num", "question", "reference", "prediction", "memory_only"],
+                data=table_data
+            )
+            wandb.log({"results_table": result_table})
+            
+            # Finish the wandb run
+            wandb.finish()
+            
+        except Exception as e:
+            print(f"Error computing aggregate metrics: {e}")
+            if use_wandb:
+                wandb.finish()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run inference with a trained HAT model.")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration file.")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to the checkpoint directory (e.g., ./output/checkpoint-500).")
-    parser.add_argument("--num_examples", type=int, default=5, help="Number of examples from the test set to run inference on.")
+    parser.add_argument("--num_stories", type=int, default=3, help="Number of unique stories/documents to process.")
+    parser.add_argument("--examples_per_story", type=int, default=3, help="Number of examples to process per story.")
     parser.add_argument("--memory_only", action="store_true", help="Run memory-only test (question without context in Stage 2)")
+    parser.add_argument("--use_wandb", action="store_true", help="Log inference results to Weights & Biases")
+    parser.add_argument("--wandb_run_name", type=str, default=None, help="Optional custom name for the wandb run")
 
     args = parser.parse_args()
 
-    run_inference(args.config, args.checkpoint, args.num_examples, args.memory_only) 
+    run_inference(args.config, args.checkpoint, args.num_stories, args.examples_per_story, args.memory_only, args.use_wandb, args.wandb_run_name) 

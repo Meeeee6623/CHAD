@@ -12,10 +12,17 @@ narrativeqa_hat_finetune_3.2_3B_run*
 wandb/
 
 # triton-backup
-triton-backup/
+.triton-backup/
 
 # onnx_model
 onnx_model/
 
 # pytorch_model
 pytorch_model/
+
+__pycache__/
+
+runs/
+
+
+

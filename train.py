@@ -13,6 +13,7 @@ from accelerate import Accelerator, DistributedType
 from accelerate.utils import set_seed as accelerate_set_seed # Use accelerate's seed setting
 from peft import LoraConfig, get_peft_model, TaskType
 import wandb  # Add wandb import
+import torch.nn as nn
 
 # Local imports
 from model import HopfieldLlama3Model, create_model_and_load_weights # Function to handle creation+loading
@@ -289,22 +290,97 @@ def train(config_path, resume_from_checkpoint=None):
 
     # --- Load Model & Weights ---
     accelerator.print("Creating/Loading model and weights...")
-    # Use LoRA settings from config
-    lora_config_dict = None
-    if config.get("use_lora"):
-        lora_config_dict = {
-            "r": config["lora_r"],
-            "lora_alpha": config["lora_alpha"],
-            "lora_dropout": config["lora_dropout"],
-            "target_modules": config["lora_target_modules"],
-            "bias": "none",
-            "task_type": TaskType.CAUSAL_LM,
-        }
+    try:
+        # Use LoRA settings from config
+        lora_config_dict = None
+        if config.get("use_lora"):
+            lora_config_dict = {
+                "r": config["lora_r"],
+                "lora_alpha": config["lora_alpha"],
+                "lora_dropout": config["lora_dropout"],
+                "target_modules": config["lora_target_modules"],
+                "bias": "none",
+                "task_type": TaskType.CAUSAL_LM,
+            }
 
-    # Create/load model on CPU first before PEFT/prepare
-    # create_model_and_load_weights assumes CPU loading internally
-    model, config = create_model_and_load_weights(config, use_lora=config.get("use_lora"), lora_config_dict=lora_config_dict)
-    accelerator.print("Model structure created and weights loaded.")
+        # Create/load model on CPU first before PEFT/prepare
+        # create_model_and_load_weights assumes CPU loading internally
+        model, config = create_model_and_load_weights(config, use_lora=config.get("use_lora"), lora_config_dict=lora_config_dict)
+        accelerator.print("Model structure created and weights loaded.")
+    except Exception as e:
+        accelerator.print(f"Error during model initialization: {e}")
+        # Print detailed error info
+        import traceback
+        accelerator.print(traceback.format_exc())
+        raise
+
+    # Fix for DeepSpeed compatibility
+    if accelerator.state.deepspeed_plugin is not None:
+        accelerator.print("Detected DeepSpeed plugin, applying comprehensive compatibility fix...")
+        try:
+            # Create a proper custom ParametersDict class with _in_forward property
+            class ParametersDict(dict):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self._in_forward = False
+                
+            # Apply the custom dict to all modules recursively
+            def convert_module_params_dict(module):
+                # First convert this module's parameters
+                if hasattr(module, "_parameters"):
+                    # Create new ParametersDict with existing parameters
+                    new_params = ParametersDict()
+                    for name, param in module._parameters.items():
+                        new_params[name] = param
+                    # Replace the parameters dictionary
+                    module._parameters = new_params
+                    
+                # Then recursively convert all children's parameters
+                for child in module.children():
+                    convert_module_params_dict(child)
+            
+            # Apply to the entire model
+            convert_module_params_dict(model)
+            
+            # Monkey-patch nn.Module.register_parameter to ensure future registered parameters use our dict
+            original_register_parameter = nn.Module.register_parameter
+            
+            def deepspeed_compatible_register_parameter(self, name, param):
+                original_register_parameter(self, name, param)
+                # After registering, ensure the _parameters dict has _in_forward
+                if not hasattr(self._parameters, "_in_forward"):
+                    new_params = ParametersDict()
+                    for p_name, p in self._parameters.items():
+                        new_params[p_name] = p
+                    self._parameters = new_params
+            
+            # Apply the monkey patch
+            nn.Module.register_parameter = deepspeed_compatible_register_parameter
+            
+            # Verify our fix worked by checking a few modules
+            verification_count = 0
+            success_count = 0
+            
+            for module in model.modules():
+                if verification_count >= 10:  # Check up to 10 modules
+                    break
+                    
+                if hasattr(module, "_parameters"):
+                    verification_count += 1
+                    if hasattr(module._parameters, "_in_forward"):
+                        success_count += 1
+                        
+            accelerator.print(f"DeepSpeed fix verification: {success_count}/{verification_count} modules checked have _in_forward")
+            
+            if success_count == verification_count and verification_count > 0:
+                accelerator.print("Applied DeepSpeed compatibility fix successfully")
+            else:
+                accelerator.print("Warning: DeepSpeed fix may not have been fully applied")
+                
+        except Exception as e:
+            accelerator.print(f"Warning: Could not apply DeepSpeed fix: {e}. Will attempt to proceed anyway.")
+            import traceback
+            accelerator.print(traceback.format_exc())
 
     # Resize embeddings if tokenizer vocab changed (AFTER loading weights)
     if len(tokenizer) != model.cfg['vocab_size']:
@@ -321,44 +397,76 @@ def train(config_path, resume_from_checkpoint=None):
     if config.get("gradient_checkpointing"):
         model.gradient_checkpointing_enable()
 
-
-    # --- Optimizer ---
+    # --- Optimizer --- Moved BEFORE accelerator.prepare ---
     accelerator.print("Setting up optimizer...")
     hopfield_params = []
     other_params = []
+    hopfield_param_names_found = []
+    other_param_names_found = []
+    
     base_lr = config['learning_rate']
     hopfield_lr = base_lr * config.get('hopfield_lr_multiplier', 1.0)
 
-    model_to_inspect = model.module if hasattr(model, "module") else model # Handle potential DDP wrap later if not using Accelerator
-    if hasattr(model, "base_model"): model_to_inspect=model.base_model # Handle PEFT model
-
-    for name, param in model.named_parameters():
+    accelerator.print("--- DEBUG: Iterating model.named_parameters() for Optimizer Groups (BEFORE prepare) ---")
+    # Iterate through the model *before* it's prepared by Accelerator
+    total_params_seen = 0
+    total_trainable_seen = 0
+    
+    # Use the PEFT model directly for parameter identification
+    model_to_iterate = model 
+    
+    for name, param in model_to_iterate.named_parameters():
+        total_params_seen += 1
+        # Print status for the first few params and some LoRA/Hopfield ones if possible
+        if total_params_seen < 5 or 'lora' in name or 'hopfield' in name:
+             # Make requires_grad check more robust
+             is_trainable = param.requires_grad
+             accelerator.print(f"  Checking param: {name} | requires_grad: {is_trainable}", flush=True)
+             
         if param.requires_grad:
-            is_hopfield = False
-            if hasattr(model_to_inspect, 'hopfield_memory'):
-                 for h_name, h_param in model_to_inspect.hopfield_memory.named_parameters():
-                     if param is h_param:
-                         hopfield_params.append(param); is_hopfield = True; break
-            if not is_hopfield:
-                 other_params.append(param)
+            total_trainable_seen += 1
+            # Use name contains check, more robust after PEFT wrapping
+            # IMPORTANT: Check against the names *as they appear* in the PEFT model iterator
+            if 'hopfield_memory' in name:
+                hopfield_params.append(param)
+                hopfield_param_names_found.append(name)
+            else:
+                # Assume any other trainable param is base or LoRA
+                other_params.append(param)
+                other_param_names_found.append(name)
+        # else: parameter does not require grad, ignore it for optimizer
 
+    accelerator.print(f"--- DEBUG: Optimizer Grouping Results (BEFORE prepare) ---")
+    accelerator.print(f"  Total params seen in model.named_parameters(): {total_params_seen}")
+    accelerator.print(f"  Total TRAINABLE params seen (param.requires_grad=True): {total_trainable_seen}")
+    accelerator.print(f"  Assigned to Hopfield Group: {len(hopfield_param_names_found)} params")
+    accelerator.print(f"  Assigned to Other (LoRA/Base) Group: {len(other_param_names_found)} params")
+    # Print first 5 names of each group for verification
+    accelerator.print(f"  Hopfield Names (first 5): {hopfield_param_names_found[:5]}")
+    accelerator.print(f"  Other Names (first 5): {other_param_names_found[:5]}")
+    accelerator.print(f"----------------------------------------")
+
+    # Check if counts are still drastically wrong
+    expected_hopfield_count = 10 # Based on previous logs, adjust if needed
+    if len(hopfield_params) < expected_hopfield_count:
+        accelerator.print(f"WARNING: Identified fewer Hopfield params ({len(hopfield_params)}) than expected ({expected_hopfield_count})! Check names above.")
+    # Use the count reported by PEFT for LoRA check
+    # Extract the number from the PEFT printout (requires PEFT to print) - this is fragile
+    # A better way: sum requires_grad=True from the loop
+    if total_trainable_seen < 1000000: # Expecting millions for LoRA + Hopfield
+        accelerator.print(f"WARNING: Identified far too few trainable params ({total_trainable_seen})! Expected millions. Check requires_grad status.")
+        
     optimizer_grouped_parameters = [
         {'params': other_params, 'lr': base_lr, 'name': 'base_or_lora'},
         {'params': hopfield_params, 'lr': hopfield_lr, 'name': 'hopfield'}
     ]
     accelerator.print(f"Optimizer: Base/LoRA LR={base_lr}, Hopfield LR={hopfield_lr}")
-    accelerator.print(f"Found {len(other_params)} trainable base/LoRA params, {len(hopfield_params)} trainable Hopfield params.")
+    # Report counts based on the *actual lengths* of the lists passed to the optimizer
+    accelerator.print(f"Optimizer Group Counts: {len(other_params)} trainable base/LoRA params, {len(hopfield_params)} trainable Hopfield params.")
 
-    # Use standard AdamW
+    # Create optimizer BEFORE prepare
     optimizer = AdamW(optimizer_grouped_parameters, eps=config['adam_epsilon'], weight_decay=config['weight_decay'])
-    # # Use 8-bit AdamW
-    # optimizer = bnb.optim.AdamW8bit(
-    #     optimizer_grouped_parameters,
-    #     eps=config['adam_epsilon'],
-    #     weight_decay=config['weight_decay']
-    #     # AdamW8bit might have slightly different default args, but eps/weight_decay are key
-    # )
-    # accelerator.print("Using 8-bit AdamW optimizer (bitsandbytes).")
+    # --- End Optimizer Setup ---
 
     # --- Load Data ---
     accelerator.print("Loading datasets...")
@@ -368,21 +476,21 @@ def train(config_path, resume_from_checkpoint=None):
     if train_dataloader is None or eval_dataloader is None:
         raise ValueError("Failed to load data.")
 
-    # --- Scheduler ---
+    # --- Scheduler --- Moved AFTER optimizer creation ---
     # Calculate steps based on distributed training
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / config['gradient_accumulation_steps'])
     max_train_steps = config['num_train_epochs'] * num_update_steps_per_epoch
 
     lr_scheduler = get_scheduler(
         name=config['lr_scheduler_type'],
-        optimizer=optimizer,
+        optimizer=optimizer, # Pass the created optimizer here
         num_warmup_steps=int(max_train_steps * config['warmup_ratio'] * accelerator.num_processes), # Scale warmup steps by num processes
         num_training_steps=max_train_steps * accelerator.num_processes, # Scale total steps
     )
     accelerator.print(f"Scheduler: Type={config['lr_scheduler_type']}, Total Steps={max_train_steps}, Num Processes={accelerator.num_processes}")
+    # --- End Scheduler Setup ---
 
-
-    # --- Prepare with Accelerator ---
+    # --- Prepare with Accelerator --- Now prepare optimizer and scheduler too
     # Order matters: model, optimizer, dataloaders, scheduler
     model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
