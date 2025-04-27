@@ -259,7 +259,7 @@ class HopfieldMemoryLayer(nn.Module):
         self.dtype = getattr(cfg, "dtype", torch.float32) # Default float32
 
         self.storedpatterns = nn.Parameter(
-            torch.zeros(self.n_heads, self.n_slots, self.pattern_dim),
+            torch.zeros(self.n_heads, self.n_memory_slots, self.pattern_dim),
             requires_grad=cfg.get("hopfield_learn_patterns", False)
         )
         
@@ -519,18 +519,24 @@ class HopfieldLlama3Model(nn.Module, GenerationMixin):
         # --- END REVISION ---
 
         self.tok_emb = nn.Embedding(self.config.vocab_size, self.config.emb_dim, dtype=self.config.dtype)
+        # Add first Hopfield layer before transformer blocks
+        self.pre_hopfield_memory = HopfieldMemoryLayer(self.config)
         self.trf_blocks = nn.ModuleList(
             [TransformerBlock(self.config) for _ in range(self.config.n_layers)]
         )
-        self.hopfield_memory = HopfieldMemoryLayer(self.config)
+        # Keep the post-transformer Hopfield layer
+        self.post_hopfield_memory = HopfieldMemoryLayer(self.config)
         self.final_norm = RMSNorm(self.config.emb_dim, eps=self.config.get("rms_norm_eps", 1e-5), dtype=self.config.dtype)
         self.out_head = nn.Linear(self.config.emb_dim, self.config.vocab_size, bias=False, dtype=self.config.dtype)
 
-        if self.hopfield_memory.init_method != "embedding_sampling":
-             self.hopfield_memory.initialize_memory(None)
+        # Initialize both Hopfield memories if needed
+        if self.pre_hopfield_memory.init_method != "embedding_sampling":
+            self.pre_hopfield_memory.initialize_memory(None)
+        if self.post_hopfield_memory.init_method != "embedding_sampling":
+            self.post_hopfield_memory.initialize_memory(None)
 
         if self.config.get("gradient_checkpointing", False):
-             self.gradient_checkpointing_enable()
+            self.gradient_checkpointing_enable()
              
     def resize_token_embeddings(self, new_num_tokens):
         """Resize token embeddings and output projection layer."""
@@ -578,13 +584,12 @@ class HopfieldLlama3Model(nn.Module, GenerationMixin):
                 attention_mask: Optional[torch.Tensor] = None,
                 inputs_embeds: Optional[torch.Tensor] = None,
                 labels: Optional[torch.Tensor] = None,
-                past_key_values: Optional[List[torch.Tensor]] = None, # Still here, though unused by our model
-                use_cache: Optional[bool] = None, # Still here, though unused by our model
+                past_key_values: Optional[List[torch.Tensor]] = None,
+                use_cache: Optional[bool] = None,
                 output_attentions: Optional[bool] = None,
                 output_hidden_states: Optional[bool] = None,
                 return_dict: Optional[bool] = None,
-                **kwargs # <<< ADD THIS to accept and ignore extra arguments
-               ):
+                **kwargs):
         # input_ids: [B, T]
         # attention_mask: [B, T]
         # inputs_embeds: [B, T, E]
@@ -638,6 +643,12 @@ class HopfieldLlama3Model(nn.Module, GenerationMixin):
         else:
              raise ValueError("Logic error: Could not determine input embeddings")
 
+        # Pass through pre-transformer Hopfield layer
+        h = self.pre_hopfield_memory(h)
+        # Update memory regardless of training/inference mode
+        if self.pre_hopfield_memory.update_strategy != "none":
+            self.pre_hopfield_memory.update_memory()
+
         # Pass through Transformer blocks
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
@@ -647,35 +658,24 @@ class HopfieldLlama3Model(nn.Module, GenerationMixin):
              if output_hidden_states:
                   all_hidden_states += (h,)
 
-             # Handle Gradient Checkpointing
              if self.config.gradient_checkpointing and self.training:
-                 # Checkpoint needs to return outputs compatible with non-checkpointed version
-                 # If block returns cache/attentions, checkpoint must also
-                 # *** Current TransformerBlock doesn't return attentions/cache ***
-                 # *** Need to modify TransformerBlock if these outputs are needed ***
                  layer_outputs = torch.utils.checkpoint.checkpoint(
-                      block, h, position_ids, use_reentrant=False # Checkpoint only passes positional args
+                      block, h, position_ids, use_reentrant=False
                  )
                  h = layer_outputs
              else:
-                 # *** Modify block call if it were to support cache/attentions ***
-                 # layer_outputs = block(h, position_ids=position_ids, past_key_value=..., use_cache=use_cache, output_attentions=output_attentions)
-                 # h = layer_outputs[0]
-                 # if use_cache: next_decoder_cache += (layer_outputs[1],)
-                 # if output_attentions: all_self_attns += (layer_outputs[2],)
                  h = block(h, position_ids=position_ids)
 
         if output_hidden_states:
              all_hidden_states += (h,)
 
-        # Pass through Hopfield Layer
-        h_hopfield = self.hopfield_memory(h)
+        # Pass through post-transformer Hopfield layer
+        h = self.post_hopfield_memory(h)
+        # Update memory regardless of training/inference mode
+        if self.post_hopfield_memory.update_strategy != "none":
+            self.post_hopfield_memory.update_memory()
 
-        # Update memory AFTER Hopfield forward pass, using its stored state
-        if self.training and self.hopfield_memory.update_strategy != "none":
-             self.hopfield_memory.update_memory()
-
-        h_final = self.final_norm(h_hopfield)
+        h_final = self.final_norm(h)
         logits = self.out_head(h_final)
 
         # --- Calculate Loss if labels provided --- #
@@ -738,9 +738,10 @@ class HopfieldLlama3Model(nn.Module, GenerationMixin):
         return model_inputs
 
     def initialize_hopfield_memory(self):
-         if not self.hopfield_memory._initialized:
-              print("Explicitly initializing Hopfield memory...")
-              self.hopfield_memory.initialize_memory(self.tok_emb.weight)
+        for i, block in enumerate(self.trf_blocks):
+            if not block.hopfield_memory._initialized:
+                print(f"Explicitly initializing Hopfield memory in block {i}...")
+                block.hopfield_memory.initialize_memory(self.tok_emb.weight)
 
     def gradient_checkpointing_enable(self):
          self.config.gradient_checkpointing = True
@@ -777,10 +778,6 @@ def create_model_and_load_weights(config: dict, use_lora: bool, lora_config_dict
     from huggingface_hub import hf_hub_download
     from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 
-    # REMOVED: Config loading - use the passed config dictionary directly
-    # with open(config_path, 'r') as f:
-    #     config = yaml.safe_load(f)
-
     # --- Ensure critical numeric params from config dict are floats ---
     try: config['rms_norm_eps'] = float(config.get('rms_norm_eps', 1e-5))
     except (ValueError, TypeError): raise TypeError(f"Config 'rms_norm_eps' must be a number.")
@@ -795,9 +792,13 @@ def create_model_and_load_weights(config: dict, use_lora: bool, lora_config_dict
     else: dtype = torch.float32
     config["dtype"] = dtype
 
-    print(f"Initializing HopfieldLlama3Model (Scratch Base) with dtype: {dtype}")
-    # Initialize OUR model structure
-    model = HopfieldLlama3Model(config)
+    # Determine model class based on configuration
+    if 'hopfield_layer_placement' in config and config['hopfield_layer_placement'] == 'pre_post':
+        print(f"Initializing HopfieldLlama3Model (pre/post Hopfield) with dtype: {dtype}")
+        model = HopfieldLlama3Model(config)
+    else:
+        print(f"Initializing DeepHopfieldLlama3Model (deep Hopfield) with dtype: {dtype}")
+        model = DeepHopfieldLlama3Model(config)
 
     # Load pretrained weights from HF Hub into OUR structure
     print(f"Loading pretrained weights for {config['model_name']}...")
@@ -823,7 +824,6 @@ def create_model_and_load_weights(config: dict, use_lora: bool, lora_config_dict
 
     except Exception as e:
          raise RuntimeError(f"Failed to load weights: {e}. Check model name and HF Hub access.")
-
 
     # Adapt HF state_dict keys to our scratch model names
     adapted_state_dict = {}
@@ -859,38 +859,60 @@ def create_model_and_load_weights(config: dict, use_lora: bool, lora_config_dict
          print("Applying weight tying for output head.")
          model.out_head.weight = model.tok_emb.weight
 
-
     # Initialize Hopfield memory AFTER embeddings are loaded
     model.initialize_hopfield_memory()
     
-    # Count and examine Hopfield parameters before LoRA
-    hopfield_params = 0
-    print("\n===== EXAMINING HOPFIELD PARAMETERS =====")
+    # --- SIMPLER APPROACH: No selective freezing ---
+    # 1. Freeze all Llama parameters
+    print("\n=== Preparing for training approach: LoRA for Llama + full training for Hopfield ===")
+    print("Freezing base Llama parameters...")
+    llama_param_count = 0
+    
+    for name, param in model.named_parameters():
+        # Keep Hopfield params trainable
+        if any(hopfield_term in name.lower() for hopfield_term in 
+              ['hopfield_memory', 'hopfield_gate', 'hopfield_update', 'hopfield_combine']):
+            param.requires_grad = True
+        # Freeze all other (Llama) params - they'll be trained via LoRA
+        else:
+            param.requires_grad = False
+            llama_param_count += param.numel()
+    
+    print(f"Frozen {llama_param_count:,} base Llama parameters that will be adapted via LoRA")
+    
+    # Count and examine Hopfield parameters that will be trained
+    hopfield_param_count = 0
+    trainable_param_count = 0
+    print("\n===== TRAINABLE HOPFIELD PARAMETERS =====")
     for name, p in model.named_parameters():
-        if 'hopfield_memory' in name:
-            requires_grad = p.requires_grad
-            param_size = p.numel()
-            hopfield_params += param_size
-            print(f"  {name}: shape={p.shape}, size={param_size}, requires_grad={requires_grad}")
-    print(f"Total Hopfield parameters: {hopfield_params}")
+        if p.requires_grad:
+            trainable_param_count += p.numel()
+            if 'hopfield' in name.lower():
+                param_size = p.numel()
+                hopfield_param_count += param_size
+                print(f"  {name}: shape={p.shape}, size={param_size}")
+    
+    print(f"Total trainable Hopfield parameters: {hopfield_param_count:,}")
+    print(f"Total trainable parameters before LoRA: {trainable_param_count:,}")
     print("========================================\n")
     
-    # Count and examine Hopfield parameters before LoRA
-    hopfield_params = 0
-    print("\n===== EXAMINING HOPFIELD PARAMETERS =====")
-    for name, p in model.named_parameters():
-        if 'hopfield_memory' in name:
-            requires_grad = p.requires_grad
-            param_size = p.numel()
-            hopfield_params += param_size
-            print(f"  {name}: shape={p.shape}, size={param_size}, requires_grad={requires_grad}")
-    print(f"Total Hopfield parameters: {hopfield_params}")
-    print("========================================\n")
-
-    # Apply LoRA AFTER loading base weights and initializing Hopfield
+    # Apply LoRA AFTER freezing base Llama weights
     if use_lora:
-        print("Applying LoRA adapters...")
-        if lora_config_dict is None: raise ValueError("LoRA config dict required when use_lora=True")
+        print("Applying LoRA adapters to frozen Llama parameters...")
+        if lora_config_dict is None:
+            # Create LoRA config from the main config
+            lora_config_dict = {
+                "r": config.get("lora_r", 32),
+                "lora_alpha": config.get("lora_alpha", 64),
+                "lora_dropout": config.get("lora_dropout", 0.05),
+                "bias": "none",
+                "task_type": "CAUSAL_LM"
+            }
+            
+            # Extract target modules
+            lora_config_dict["target_modules"] = config.get("lora_target_modules", 
+                ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+        
         peft_config = LoraConfig(**lora_config_dict) # Create config from dict
 
         # --- Important: Map target modules to scratch names ---
@@ -902,129 +924,72 @@ def create_model_and_load_weights(config: dict, use_lora: bool, lora_config_dict
             for hf_name, scratch_name in {**hf_to_scratch_attn, **hf_to_scratch_ffn}.items():
                  if hf_name in hf_target_modules:
                       scratch_target_modules.add(scratch_name)
-        # Add embedding/output head if needed (less common for LoRA)
-        # if "embed_tokens" in hf_target_modules: scratch_target_modules.add("tok_emb")
-        # if "lm_head" in hf_target_modules: scratch_target_modules.add("out_head")
 
         peft_config.target_modules = list(scratch_target_modules)
         print(f"Applying LoRA to modules: {peft_config.target_modules}")
 
-        # Save original requires_grad state of Hopfield parameters
-        hopfield_params_state = {}
-        for name, param in model.named_parameters():
-            if 'hopfield_memory' in name:
-                hopfield_params_state[name] = param.requires_grad
-
-        # Save original requires_grad state of Hopfield parameters
-        hopfield_params_state = {}
-        for name, param in model.named_parameters():
-            if 'hopfield_memory' in name:
-                hopfield_params_state[name] = param.requires_grad
-
         # Apply PEFT to the model
         model = get_peft_model(model, peft_config)
         
-        
-        # Ensure Hopfield parameters remain trainable if LoRA is applied
+        # Double-check that Hopfield parameters remain trainable after LoRA application
         hopfield_trainable_count = 0
-        print("\n===== CHECKING HOPFIELD PARAMETERS AFTER LORA =====")
-        hopfield_trainable_count = 0
-        print("\n===== CHECKING HOPFIELD PARAMETERS AFTER LORA =====")
+        print("\n===== VERIFYING PARAMETER STATUS AFTER LORA =====")
         for name, param in model.named_parameters():
-            if any(hf_name in name for hf_name in ['hopfield_memory', 'hopfield_']):
-                old_requires_grad = param.requires_grad
-            if any(hf_name in name for hf_name in ['hopfield_memory', 'hopfield_']):
-                old_requires_grad = param.requires_grad
-                param.requires_grad = True
+            if any(hopfield_term in name.lower() for hopfield_term in 
+                  ['hopfield_memory', 'hopfield_gate', 'hopfield_update', 'hopfield_combine']):
+                if not param.requires_grad:
+                    print(f"WARNING: {name} should be trainable but isn't! Fixing...")
+                    param.requires_grad = True
                 param_count = param.numel()
                 hopfield_trainable_count += param_count
-                print(f"  {name}: shape={param.shape}, size={param_count}, was_trainable={old_requires_grad}, now_trainable={param.requires_grad}")
         
-        print(f"Made {hopfield_trainable_count} Hopfield parameters trainable after LoRA application")
-        print("================================================\n")
+        print(f"Confirmed {hopfield_trainable_count:,} Hopfield parameters are trainable")
         
-        # Verify parameter status
-        frozen_hopfield = []
-        for name, param in model.named_parameters():
-            if 'hopfield_memory' in name and not param.requires_grad:
-                frozen_hopfield.append(name)
-        
-        if frozen_hopfield:
-            print(f"WARNING: Some Hopfield parameters are still frozen: {frozen_hopfield}")
-        
+        # Print trainable parameter report from PEFT
+        print("\n===== PEFT TRAINABLE PARAMETER REPORT =====")
         model.print_trainable_parameters()
-                param_count = param.numel()
-                hopfield_trainable_count += param_count
-                print(f"  {name}: shape={param.shape}, size={param_count}, was_trainable={old_requires_grad}, now_trainable={param.requires_grad}")
-        
-        print(f"Made {hopfield_trainable_count} Hopfield parameters trainable after LoRA application")
-        print("================================================\n")
-        
-        # Verify parameter status
-        frozen_hopfield = []
-        for name, param in model.named_parameters():
-            if 'hopfield_memory' in name and not param.requires_grad:
-                frozen_hopfield.append(name)
-        
-        if frozen_hopfield:
-            print(f"WARNING: Some Hopfield parameters are still frozen: {frozen_hopfield}")
-        
-        model.print_trainable_parameters()
-
+        print("===========================================\n")
 
     print("Model creation and weight loading complete.")
     return model, config
 
 def setup_optimizer(model, config):
     """Set up optimizer with proper parameter groups and learning rates."""
-    print("\n--- DEBUG: Iterating model.named_parameters() for Optimizer Groups ---")
+    print("\n--- Optimizer Parameter Group Configuration ---")
     
     # Initialize parameter groups
     hopfield_params = []
+    lora_params = []
     other_params = []
-    hopfield_names = []
-    other_names = []
-    total_params = 0
-    trainable_params = 0
+    hopfield_param_count = 0
+    lora_param_count = 0
+    other_param_count = 0
 
     # Categorize parameters
     for name, param in model.named_parameters():
-        total_params += 1
-        if param.requires_grad:
-            trainable_params += 1
-            print(f"  Checking param: {name} | requires_grad: {param.requires_grad}")
+        if not param.requires_grad:
+            continue
             
-            # More flexible substring matching for Hopfield parameters
-            if 'hopfield' in name.lower():
-                hopfield_params.append(param)
-                hopfield_names.append(name)
-            else:
-                other_params.append(param)
-                other_names.append(name)
+        # Check if this is a Hopfield parameter
+        if any(hopfield_term in name.lower() for hopfield_term in 
+               ['hopfield_memory', 'hopfield_gate', 'hopfield_update', 'hopfield_combine']):
+            hopfield_params.append(param)
+            hopfield_param_count += param.numel()
+        # Check if this is a LoRA parameter (when using PEFT)
+        elif 'lora_' in name.lower():
+            lora_params.append(param)
+            lora_param_count += param.numel()
+        # Any other trainable parameter
+        else:
+            other_params.append(param)
+            other_param_count += param.numel()
 
     # Print debug information
-    print("\n--- DEBUG: Optimizer Grouping Results ---")
-    print(f"  Total params seen in model.named_parameters(): {total_params}")
-    print(f"  Total TRAINABLE params seen (param.requires_grad=True): {trainable_params}")
-    print(f"  Assigned to Hopfield Group: {len(hopfield_params)} params")
-    print(f"  Assigned to Other (LoRA/Base) Group: {len(other_params)} params")
-    
-    if hopfield_names:
-        print(f"  Hopfield Names: {', '.join(hopfield_names[:5])}" + 
-              ("..." if len(hopfield_names) > 5 else ""))
-    if other_names:
-        print(f"  Other Names: {', '.join(other_names[:5])}" + 
-              ("..." if len(other_names) > 5 else ""))
-    print("----------------------------------------")
-
-    # Calculate parameter counts for verification
-    hopfield_param_count = sum(p.numel() for p in hopfield_params)
-    other_param_count = sum(p.numel() for p in other_params)
-    
-    print(f"Parameter Counts:")
-    print(f"  Hopfield parameters: {hopfield_param_count:,}")
-    print(f"  Other parameters: {other_param_count:,}")
-    print(f"  Total trainable parameters: {hopfield_param_count + other_param_count:,}")
+    print(f"  Trainable parameter distribution:")
+    print(f"  - Hopfield parameters: {len(hopfield_params)} parameters ({hopfield_param_count:,} elements)")
+    print(f"  - LoRA parameters: {len(lora_params)} parameters ({lora_param_count:,} elements)")
+    print(f"  - Other trainable parameters: {len(other_params)} parameters ({other_param_count:,} elements)")
+    print(f"  - Total trainable parameters: {hopfield_param_count + lora_param_count + other_param_count:,} elements")
 
     # Set up learning rates
     base_lr = config.get('learning_rate', 3e-5)
@@ -1032,24 +997,244 @@ def setup_optimizer(model, config):
     hopfield_lr = base_lr * hopfield_lr_multiplier
 
     # Create optimizer with parameter groups
-    optimizer_groups = [
-        {'params': other_params, 'lr': base_lr},
-        {'params': hopfield_params, 'lr': hopfield_lr}
-    ]
+    optimizer_groups = []
+    
+    # Add Hopfield parameters with their special learning rate
+    if hopfield_params:
+        optimizer_groups.append({
+            'params': hopfield_params, 
+            'lr': hopfield_lr, 
+            'name': 'hopfield_params'
+        })
+    
+    # Add LoRA parameters with base learning rate
+    if lora_params:
+        optimizer_groups.append({
+            'params': lora_params, 
+            'lr': base_lr,
+            'name': 'lora_params'
+        })
+    
+    # Add any other trainable parameters
+    if other_params:
+        optimizer_groups.append({
+            'params': other_params, 
+            'lr': base_lr,
+            'name': 'other_params'
+        })
 
     print(f"\nOptimizer Configuration:")
-    print(f"  Base/LoRA LR: {base_lr}")
-    print(f"  Hopfield LR: {hopfield_lr}")
+    print(f"  Base LR: {base_lr}")
+    print(f"  Hopfield LR: {hopfield_lr} (multiplier: {hopfield_lr_multiplier})")
     print(f"  Parameter Groups: {len(optimizer_groups)}")
     print("----------------------------------------\n")
 
     # Create optimizer (assuming AdamW - modify if using a different optimizer)
     optimizer = torch.optim.AdamW(
         optimizer_groups,
-        lr=base_lr,
+        lr=base_lr,  # Default learning rate for any group that doesn't specify its own
         betas=(config.get('adam_beta1', 0.9), config.get('adam_beta2', 0.999)),
         eps=config.get('adam_epsilon', 1e-8),
         weight_decay=config.get('weight_decay', 0.01)
     )
 
     return optimizer
+
+class DeepHopfieldTransformerBlock(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        # Add Hopfield layer before attention
+        self.hopfield_memory = HopfieldMemoryLayer(cfg)
+        self.att = GroupedQueryAttention(cfg)
+        self.ff = FeedForward(cfg)
+        # Use RMSNorm from scratch code implementation
+        self.norm1 = RMSNorm(cfg.emb_dim, eps=cfg.get("rms_norm_eps", 1e-5), dtype=cfg.dtype)
+        self.norm2 = RMSNorm(cfg.emb_dim, eps=cfg.get("rms_norm_eps", 1e-5), dtype=cfg.dtype)
+
+    def forward(self, x, position_ids=None):
+        residual = x
+        # Apply norm first
+        hidden_states_norm = self.norm1(x)
+        
+        # Process through Hopfield layer before attention
+        hidden_states_hopfield = self.hopfield_memory(hidden_states_norm)
+        # Update memory regardless of training/inference mode
+        if self.hopfield_memory.update_strategy != "none":
+            self.hopfield_memory.update_memory()
+            
+        # Apply attention to Hopfield-processed states
+        attn_output = self.att(hidden_states_hopfield, position_ids=position_ids)
+        h = residual + attn_output # Residual connection
+
+        residual = h
+        hidden_states_norm = self.norm2(h)
+        ff_output = self.ff(hidden_states_norm)
+        out = residual + ff_output # Residual connection
+
+        return out
+
+class DeepHopfieldLlama3Model(nn.Module, GenerationMixin):
+    main_input_name = "input_ids"
+
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg # Keep original dict if needed elsewhere
+        cfg.setdefault('model_type', 'custom_llama')
+        self.config = ConfigNamespace(**cfg) # Config object used by GenerationMixin
+        self.config.is_encoder_decoder = False # Explicitly set for GenerationMixin compatibility
+
+        # --- REVISED APPROACH ---
+        # Set use_cache on the config object (standard)
+        self.config.use_cache = False
+        # Set _supports_cache_class directly on the model instance
+        self._supports_cache_class = False # <<< Set directly on self
+        # --- END REVISION ---
+
+        self.tok_emb = nn.Embedding(self.config.vocab_size, self.config.emb_dim, dtype=self.config.dtype)
+        self.trf_blocks = nn.ModuleList(
+            [DeepHopfieldTransformerBlock(self.config) for _ in range(self.config.n_layers)]
+        )
+        self.final_norm = RMSNorm(self.config.emb_dim, eps=self.config.get("rms_norm_eps", 1e-5), dtype=self.config.dtype)
+        self.out_head = nn.Linear(self.config.emb_dim, self.config.vocab_size, bias=False, dtype=self.config.dtype)
+
+        # Initialize Hopfield memories in each block if needed
+        for block in self.trf_blocks:
+            if block.hopfield_memory.init_method != "embedding_sampling":
+                block.hopfield_memory.initialize_memory(None)
+
+        if self.config.get("gradient_checkpointing", False):
+            self.gradient_checkpointing_enable()
+
+    def forward(self,
+                input_ids: Optional[torch.Tensor] = None,
+                position_ids: Optional[torch.Tensor] = None,
+                attention_mask: Optional[torch.Tensor] = None,
+                inputs_embeds: Optional[torch.Tensor] = None,
+                labels: Optional[torch.Tensor] = None,
+                past_key_values: Optional[List[torch.Tensor]] = None,
+                use_cache: Optional[bool] = None,
+                output_attentions: Optional[bool] = None,
+                output_hidden_states: Optional[bool] = None,
+                return_dict: Optional[bool] = None,
+                **kwargs):
+        # input_ids: [B, T]
+        # attention_mask: [B, T]
+        # inputs_embeds: [B, T, E]
+
+        # Determine whether to output attentions/hidden states based on args or config
+        # Note: We should check the passed `use_cache` argument if we were implementing cache
+        use_cache = use_cache if use_cache is not None else self.config.get("use_cache", False) # Respect passed argument if available
+        output_attentions = output_attentions if output_attentions is not None else self.config.get("output_attentions", False)
+        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.get("output_hidden_states", False)
+        return_dict = return_dict if return_dict is not None else self.config.get("use_return_dict", True) # HF usually defaults use_return_dict to True
+
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("Cannot specify both input_ids and inputs_embeds")
+        if input_ids is None and inputs_embeds is None:
+            raise ValueError("Either input_ids or inputs_embeds must be provided")
+        if inputs_embeds is not None:
+            # This model currently relies on input_ids for embedding lookup.
+            # If inputs_embeds is needed, the embedding step needs modification.
+            warnings.warn("inputs_embeds provided but HopfieldLlama3Model currently uses input_ids for embedding lookup.")
+            # For now, try to proceed assuming input_ids were intended or derived elsewhere if possible
+            # Get batch_size and seq_len from inputs_embeds if input_ids is None
+            batch_size, seq_len, _ = inputs_embeds.shape
+            # Need to handle device placement if inputs_embeds is primary
+            device = inputs_embeds.device
+            # Set input_ids to None explicitly if embeds are primary?
+            # input_ids = None # This might break downstream logic if embeds aren't used
+        elif input_ids is not None:
+            batch_size, seq_len = input_ids.shape
+            device = input_ids.device
+        else:
+            # Should be unreachable due to earlier check
+            raise ValueError("Logic error: Need either input_ids or inputs_embeds")
+
+
+        # Ensure position_ids are generated correctly based on available input
+        if position_ids is None:
+             past_length = 0
+             if past_key_values is not None and past_key_values[0] is not None:
+                  if seq_len == 1 and len(past_key_values[0]) > 0:
+                       try: past_length = past_key_values[0][0].shape[2]
+                       except: pass
+                  position_ids = torch.arange(past_length, past_length + seq_len, device=device).unsqueeze(0)
+             else:
+                  position_ids = torch.arange(seq_len, device=device).unsqueeze(0)
+
+        # --- Embedding Lookup --- #
+        if inputs_embeds is not None:
+             h = inputs_embeds
+        elif input_ids is not None:
+             h = self.tok_emb(input_ids)
+        else:
+             raise ValueError("Logic error: Could not determine input embeddings")
+
+        # Pass through Transformer blocks with integrated Hopfield layers
+        all_hidden_states = () if output_hidden_states else None
+        all_self_attns = () if output_attentions else None
+        next_decoder_cache = () if use_cache else None
+
+        for i, block in enumerate(self.trf_blocks):
+            if output_hidden_states:
+                all_hidden_states += (h,)
+
+            if self.config.gradient_checkpointing and self.training:
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    block, h, position_ids, use_reentrant=False
+                )
+                h = layer_outputs
+            else:
+                h = block(h, position_ids=position_ids)
+
+        if output_hidden_states:
+            all_hidden_states += (h,)
+
+        h_final = self.final_norm(h)
+        logits = self.out_head(h_final)
+
+        # --- Calculate Loss if labels provided --- #
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = nn.CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, self.config.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+
+        # Prepare output
+        if not return_dict:
+            outputs = (logits,) + (None,) + (all_hidden_states,) + (None,)
+            return (loss,) + outputs if loss is not None else outputs
+
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=None,
+            hidden_states=all_hidden_states,
+            attentions=all_self_attns,
+        )
+
+    def initialize_hopfield_memory(self):
+        for i, block in enumerate(self.trf_blocks):
+            if not block.hopfield_memory._initialized:
+                print(f"Explicitly initializing Hopfield memory in block {i}...")
+                block.hopfield_memory.initialize_memory(self.tok_emb.weight)
+
+    def gradient_checkpointing_enable(self):
+        self.config.gradient_checkpointing = True
+        print("Gradient checkpointing enabled for Transformer blocks.")
+
+    def gradient_checkpointing_disable(self):
+        self.config.gradient_checkpointing = False
+        print("Gradient checkpointing disabled.")
+
+    def can_generate(self) -> bool:
+        return True
+
+    def _validate_model_class(self):
+        pass        

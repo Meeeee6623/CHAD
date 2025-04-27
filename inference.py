@@ -8,7 +8,7 @@ from collections import defaultdict
 import wandb  # Add wandb import
 
 # Local imports
-from model import HopfieldLlama3Model, create_model_and_load_weights # Re-use model creation logic
+from model import HopfieldLlama3Model, DeepHopfieldLlama3Model, create_model_and_load_weights # Add DeepHopfield model
 from tokenizer_utils import get_tokenizer
 from data_loader import get_dataloader # Use the updated data loader
 from peft import PeftModel # For loading LoRA adapters
@@ -69,6 +69,11 @@ def run_inference(config_path, checkpoint_dir, num_stories=3, examples_per_story
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
+    # --- Determine Model Architecture --- #
+    print("Determining model architecture...")
+    model_class = DeepHopfieldLlama3Model if 'hopfield_layer_placement' not in config or config.get('hopfield_layer_placement') != 'pre_post' else HopfieldLlama3Model
+    print(f"Using model class: {model_class.__name__}")
+
     # --- Load Base Model (Structure only, no pretrained weights initially) --- #
     print("Creating base model structure...")
     # We create the base model structure first, then load pretrained weights,
@@ -78,7 +83,7 @@ def run_inference(config_path, checkpoint_dir, num_stories=3, examples_per_story
     temp_config_for_structure['use_lora'] = False
     # Ensure correct dtype is set for initial model creation
     temp_config_for_structure['dtype'] = model_dtype
-    base_model = HopfieldLlama3Model(temp_config_for_structure)
+    base_model = model_class(temp_config_for_structure)
     print("Base model structure created.")
 
     # --- Load Pretrained Weights into Base Model --- #
@@ -198,26 +203,6 @@ def run_inference(config_path, checkpoint_dir, num_stories=3, examples_per_story
             current_context_end_idx = context_end_idx_tensor[i].item()
             current_answer_text = answer_texts[i]
 
-            # --- Debugging Labels Tensor in Inference ---
-            if i == 0 and len(results) == 0:  # Print only for the very first example
-                print(f"\n--- INFERENCE LABEL DEBUG (First Example) ---")
-                print(f"Raw labels shape for this item: {current_labels.shape}")
-                # Get the part of labels that should contain the answer
-                # Move labels to the same device as the indices for indexing
-                current_labels_cpu = current_labels.cpu()
-                label_indices_after_context = torch.arange(current_context_end_idx, current_labels.shape[0], device='cpu')
-                if len(label_indices_after_context) > 0:
-                    answer_part_labels = current_labels_cpu[label_indices_after_context]
-                    # Filter out -100 padding
-                    valid_answer_label_tokens = answer_part_labels[answer_part_labels != -100]
-                    print(f"Valid answer label token IDs: {valid_answer_label_tokens.tolist()}")
-                    decoded_inference_label_answer = tokenizer.decode(valid_answer_label_tokens, skip_special_tokens=True)
-                    print(f"Decoded Answer directly from Inference Labels: '{decoded_inference_label_answer}'")
-                else:
-                    print("No label indices found after context_end_idx.")
-                print("------------------------------------------\n")
-            # --- End Debugging ---
-
             # --- Two-Stage Inference Simulation --- #
             with torch.no_grad():
                 # **Stage 1: Process Context**
@@ -234,12 +219,42 @@ def run_inference(config_path, checkpoint_dir, num_stories=3, examples_per_story
                         continue
                 
                 # Reset Hopfield memory before processing context
-                if hasattr(model, 'base_model') and hasattr(model.base_model, 'hopfield_memory'):
-                    if hasattr(model.base_model.hopfield_memory, 'reset_memory'):
-                        model.base_model.hopfield_memory.reset_memory()
-                elif hasattr(model, 'hopfield_memory'):
-                    if hasattr(model.hopfield_memory, 'reset_memory'):
-                        model.hopfield_memory.reset_memory()
+                # Handle both model architectures and PEFT wrapped models
+                if hasattr(model, 'reset_hopfield_memory'):
+                    model.reset_hopfield_memory()
+                elif hasattr(model, 'base_model') and hasattr(model.base_model, 'reset_hopfield_memory'):
+                    model.base_model.reset_hopfield_memory()
+                else:
+                    # Try to find any Hopfield layers in the model
+                    hopfield_layers = []
+                    
+                    # For HopfieldLlama3Model architecture with pre/post layers
+                    if hasattr(model, 'pre_hopfield_memory'):
+                        hopfield_layers.append(model.pre_hopfield_memory)
+                    if hasattr(model, 'post_hopfield_memory'):
+                        hopfield_layers.append(model.post_hopfield_memory)
+                    
+                    # For DeepHopfieldLlama3Model with layers before each attention block
+                    if hasattr(model, 'trf_blocks'):
+                        for block in model.trf_blocks:
+                            if hasattr(block, 'hopfield_memory'):
+                                hopfield_layers.append(block.hopfield_memory)
+                    
+                    # For PEFT wrapped versions of both architectures
+                    if hasattr(model, 'base_model'):
+                        if hasattr(model.base_model, 'pre_hopfield_memory'):
+                            hopfield_layers.append(model.base_model.pre_hopfield_memory)
+                        if hasattr(model.base_model, 'post_hopfield_memory'):
+                            hopfield_layers.append(model.base_model.post_hopfield_memory)
+                        if hasattr(model.base_model, 'trf_blocks'):
+                            for block in model.base_model.trf_blocks:
+                                if hasattr(block, 'hopfield_memory'):
+                                    hopfield_layers.append(block.hopfield_memory)
+                    
+                    # Reset found Hopfield layers
+                    for layer in hopfield_layers:
+                        if hasattr(layer, 'reset_memory'):
+                            layer.reset_memory()
 
                 if context_tokens.shape[1] > 0:
                     # Forward pass just for context - populates internal state (hidden states for Hopfield)
@@ -247,19 +262,23 @@ def run_inference(config_path, checkpoint_dir, num_stories=3, examples_per_story
                     _ = model(input_ids=context_tokens, position_ids=context_pos_ids)
 
                     # **Stage 1.5: Update Hopfield Memory (if applicable)**
-                    # Manually trigger update based on internal state from context pass
-                    update_occurred = False
-                    if hasattr(model, 'base_model') and hasattr(model.base_model, 'hopfield_memory'):
-                        hopfield_layer = model.base_model.hopfield_memory
-                    elif hasattr(model, 'hopfield_memory'):
-                        hopfield_layer = model.hopfield_memory
-                    else:
-                        hopfield_layer = None
-
-                    if hopfield_layer and hasattr(hopfield_layer, 'update_memory') and hopfield_layer.update_strategy != "none":
-                        hopfield_layer.update_memory()
-                        update_occurred = True
-
+                    # Helper function to update Hopfield layers
+                    def update_hopfield_layers(model_obj):
+                        if hasattr(model_obj, 'pre_hopfield_memory') and hasattr(model_obj.pre_hopfield_memory, 'update_memory'):
+                            model_obj.pre_hopfield_memory.update_memory()
+                        if hasattr(model_obj, 'post_hopfield_memory') and hasattr(model_obj.post_hopfield_memory, 'update_memory'):
+                            model_obj.post_hopfield_memory.update_memory()
+                        # Update deep Hopfield layers in transformer blocks
+                        if hasattr(model_obj, 'trf_blocks'):
+                            for block in model_obj.trf_blocks:
+                                if hasattr(block, 'hopfield_memory') and hasattr(block.hopfield_memory, 'update_memory'):
+                                    block.hopfield_memory.update_memory()
+                    
+                    # Try updating Hopfield layers in both base model and PEFT wrapper
+                    update_hopfield_layers(model)
+                    if hasattr(model, 'base_model'):
+                        update_hopfield_layers(model.base_model)
+                        
                 # **Stage 2: Generate Answer**
                 # For memory-only test, use ONLY question tokens without context
                 if memory_only_test and question_tokens is not None:

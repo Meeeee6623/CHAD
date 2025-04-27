@@ -1,0 +1,82 @@
+# Model Configuration
+model_name: "meta-llama/Llama-3.2-3B-Instruct"
+model_dtype: "bfloat16"
+attn_implementation: "flash_attention_2"
+max_eval_examples: 5
+
+# Llama 3.2 3B parameters
+emb_dim: 3072
+n_layers: 28
+n_heads: 24
+n_kv_groups: 8
+hidden_dim: 8192
+rope_base: 500000.0
+rms_norm_eps: 1e-5
+vocab_size: 128256
+
+# Context Length
+original_context_length: 128000
+context_length: 4096
+rope_freq: null
+
+# Deep Hopfield Layer Configuration
+use_hopfield_memory: True
+hopfield_layer_placement: "deep"
+hopfield_heads: 24
+hopfield_memory_slots: 128
+hopfield_num_updates: 2
+hopfield_init_method: "embedding_sampling"
+initialize_memory_from_embedding: True
+hopfield_update_strategy: "gated"
+hopfield_memory_update_lr: 0.018
+hopfield_gate_input_pooling: "attention"
+hopfield_update_target_method: "max_query"
+hopfield_clamp_patterns: 3.0
+hopfield_clamp_beta: 6.0
+hopfield_combine_method: "gated_add"
+
+# Data Configuration
+dataset_name: "deepmind/narrativeqa"
+story_chunk_size: 768
+story_chunk_overlap: 128
+max_answer_length: 64
+data_cache_dir: "./data_cache"
+
+# Training Configuration
+output_dir: "./narrativeqa_hopfield_deep_finetune_3.2_3B"
+num_train_epochs: 10
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1
+gradient_accumulation_steps: 64
+learning_rate: 3e-5
+hopfield_lr_multiplier: 5.0
+weight_decay: 0.01
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1e-8
+max_grad_norm: 1.0
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.08
+logging_steps: 20
+save_steps: 900
+eval_steps: 900
+seed: 42
+gradient_checkpointing: True
+
+# LoRA Configuration (only for Llama parameters)
+use_lora: True
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+# Only targeting Llama attention and MLP layers
+lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+
+# Evaluation Configuration
+num_beams: 1
+
+# Logging Configuration
+use_wandb: True
+wandb_project: "CHAD"
+wandb_entity: "benjamin-chauhan-usyd"
+wandb_run_name: null 

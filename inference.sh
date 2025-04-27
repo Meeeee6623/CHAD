@@ -8,6 +8,11 @@
 #SBATCH -o slurm-inference-%j.out # Changed log filename
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
+#SBATCH --partition=athena-genai
+#SBATCH --account=pl217
+#SBATCH --nodelist=node6
+
+export CUDA_VISIBLE_DEVICES=6
 
 # Activate conda environment
 source ~/miniconda3/etc/profile.d/conda.sh

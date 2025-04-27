@@ -21,12 +21,9 @@ wandb login 2d7ef6b48d8585e96e62fd153e23f1a90548cde2 # shhhh
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate simpler_env
 
-# Choose which configuration to use:
-# 1. Deep Hopfield (Hopfield layers in each transformer block)
+# Pass resume_from_checkpoint explicitly to train.py
 accelerate launch --config-file deep_hopfield_acc_config.yaml train.py --config config_hopfield_deep.yaml
 
-# 2. Pre/Post Hopfield (Hopfield layers only at the beginning and end of the model)
-# accelerate launch --config-file deep_hopfield_acc_config.yaml train.py --config config_hopfield_prepost.yaml
 
 # Cleanup
 conda deactivate

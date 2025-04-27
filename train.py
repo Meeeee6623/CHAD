@@ -16,7 +16,7 @@ import wandb  # Add wandb import
 import torch.nn as nn
 
 # Local imports
-from model import HopfieldLlama3Model, create_model_and_load_weights # Function to handle creation+loading
+from model import HopfieldLlama3Model, DeepHopfieldLlama3Model, create_model_and_load_weights # Add DeepHopfield model
 from tokenizer_utils import get_tokenizer
 from data_loader import get_dataloader
 from utils import save_checkpoint, compute_metrics, init_metrics # Removed set_seed from utils
@@ -72,10 +72,21 @@ def evaluate(model, eval_dataloader, tokenizer, device, config, accelerator):
         # A more precise implementation would track doc_id changes *within* the batch if possible/needed.
         # Resetting per batch is safer if batches might contain mixed docs.
         unwrapped_model = accelerator.unwrap_model(model)
-        if hasattr(unwrapped_model, 'hopfield_memory') and hasattr(unwrapped_model.hopfield_memory, 'reset_memory'):
-             # print("Resetting Hopfield memory for new evaluation batch.")
-             unwrapped_model.hopfield_memory.reset_memory()
-        # No need to wait_for_everyone here as eval is usually single-process or syncs later
+        base_model = unwrapped_model.base_model if hasattr(unwrapped_model, 'base_model') else unwrapped_model
+        
+        # Handle both model architectures
+        # Pre/post architecture
+        if hasattr(base_model, 'pre_hopfield_memory') and hasattr(base_model.pre_hopfield_memory, 'reset_memory'):
+            base_model.pre_hopfield_memory.reset_memory()
+        
+        if hasattr(base_model, 'post_hopfield_memory') and hasattr(base_model.post_hopfield_memory, 'reset_memory'):
+            base_model.post_hopfield_memory.reset_memory()
+        
+        # Deep architecture
+        if hasattr(base_model, 'trf_blocks'):
+            for block in base_model.trf_blocks:
+                if hasattr(block, 'hopfield_memory') and hasattr(block.hopfield_memory, 'reset_memory'):
+                    block.hopfield_memory.reset_memory()
 
         # --- Prepare Prompts for Generation ---
         # Identify prompt part for generation - run on CPU to avoid OOM during generation
@@ -697,9 +708,21 @@ def train(config_path, resume_from_checkpoint=None):
                 
                 if should_reset:
                     unwrapped_model = accelerator.unwrap_model(model)
-                    if hasattr(unwrapped_model, 'hopfield_memory') and hasattr(unwrapped_model.hopfield_memory, 'reset_memory'):
-                        # print(f"Doc ID changed ({last_processed_doc_id} -> {current_batch_first_doc_id}), resetting Hopfield memory.")
-                        unwrapped_model.hopfield_memory.reset_memory()
+                    base_model = unwrapped_model.base_model if hasattr(unwrapped_model, 'base_model') else unwrapped_model
+                    
+                    # Handle both model architectures
+                    # Pre/post architecture
+                    if hasattr(base_model, 'pre_hopfield_memory') and hasattr(base_model.pre_hopfield_memory, 'reset_memory'):
+                        base_model.pre_hopfield_memory.reset_memory()
+                    
+                    if hasattr(base_model, 'post_hopfield_memory') and hasattr(base_model.post_hopfield_memory, 'reset_memory'):
+                        base_model.post_hopfield_memory.reset_memory()
+                    
+                    # Deep architecture
+                    if hasattr(base_model, 'trf_blocks'):
+                        for block in base_model.trf_blocks:
+                            if hasattr(block, 'hopfield_memory') and hasattr(block.hopfield_memory, 'reset_memory'):
+                                block.hopfield_memory.reset_memory()
                 
                 # Update last processed doc_id to the last one in this batch
                 # This ensures we'll reset on the next batch if needed
@@ -728,10 +751,24 @@ def train(config_path, resume_from_checkpoint=None):
 
                 # --- Stage 1.5: Update Hopfield Memory (using internal state from Stage 1) ---
                 unwrapped_model = accelerator.unwrap_model(model)
-                if hasattr(unwrapped_model, 'hopfield_memory') and hasattr(unwrapped_model.hopfield_memory, 'update_memory'):
-                     # Update happens based on the state stored during the context forward passes
-                     if unwrapped_model.hopfield_memory.update_strategy != "none":
-                         unwrapped_model.hopfield_memory.update_memory() # Update based on stored state
+                base_model = unwrapped_model.base_model if hasattr(unwrapped_model, 'base_model') else unwrapped_model
+                
+                # Handle both model architectures
+                # Pre/post architecture
+                if hasattr(base_model, 'pre_hopfield_memory') and hasattr(base_model.pre_hopfield_memory, 'update_memory'):
+                    if base_model.pre_hopfield_memory.update_strategy != "none":
+                        base_model.pre_hopfield_memory.update_memory()
+                        
+                if hasattr(base_model, 'post_hopfield_memory') and hasattr(base_model.post_hopfield_memory, 'update_memory'):
+                    if base_model.post_hopfield_memory.update_strategy != "none":
+                        base_model.post_hopfield_memory.update_memory()
+                
+                # Deep architecture
+                if hasattr(base_model, 'trf_blocks'):
+                    for block in base_model.trf_blocks:
+                        if hasattr(block, 'hopfield_memory') and hasattr(block.hopfield_memory, 'update_memory'):
+                            if block.hopfield_memory.update_strategy != "none":
+                                block.hopfield_memory.update_memory()
 
                 # --- Stage 2: QA Processing & Loss Calculation (Uses updated Hopfield state) ---
                 # MODIFIED: Use only question portion to force memory usage
