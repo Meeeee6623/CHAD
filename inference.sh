@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#SBATCH --job-name=hat-inference # Changed job name
+#SBATCH --job-name=chad-inference # Changed job name
 #SBATCH --cpus-per-task=32
 #SBATCH --ntasks=1
 #SBATCH --gpus-per-task=1
@@ -8,9 +8,7 @@
 #SBATCH -o slurm-inference-%j.out # Changed log filename
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
-#SBATCH --partition=athena-genai
-#SBATCH --account=pl217
-#SBATCH --nodelist=node6
+#SBATCH --partition=gpu
 
 export CUDA_VISIBLE_DEVICES=6
 
